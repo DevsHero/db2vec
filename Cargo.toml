@@ -1,0 +1,21 @@
+[package]
+name = "db2vec"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+redis = "0.29"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0"
+reqwest = { version = "0.11", features = ["json", "blocking"] }
+ 
+google-generative-ai-rs = "0.3"
+tokio = { version = "1", features = ["full"] }
+uuid =   { version = "1.16.0", features = ["v4", "rng-getrandom"] }
+regex = "1.11.1"
+byteorder = "1.5.0"
+base64 = "0.22.1"
+html2text = "0.14.3"
+clap =  { version = "4", features = ["derive", "env"] }
+dotenvy = "0.15.7"
+ 

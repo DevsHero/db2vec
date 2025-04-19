@@ -1,0 +1,8 @@
+/target
+.env
+/volumes
+/root
+/chroma-data
+history.txt
+milvus-docker-compose.yml
+milvus.yaml
