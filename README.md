@@ -72,7 +72,7 @@ EMBEDDING_MODEL="nomic-embed-text"
 
 1.  **Clone the Repository:**
     ```bash
-    git clone https://github.com/your-username/db2vec.git # Replace with your repo URL
+    git clone https://github.com/DevsHero/db2vec.git 
     cd db2vec
     ```
 2.  **Ensure Prerequisites:** Start Ollama and your target vector database. Pull the necessary Ollama model.
