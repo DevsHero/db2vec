@@ -8,8 +8,7 @@ redis = "0.29"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
 reqwest = { version = "0.11", features = ["json", "blocking"] }
- 
-google-generative-ai-rs = "0.3"
+
 tokio = { version = "1", features = ["full"] }
 uuid =   { version = "1.16.0", features = ["v4", "rng-getrandom"] }
 regex = "1.11.1"
