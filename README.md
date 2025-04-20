@@ -13,6 +13,7 @@ Tired of waiting hours for Python scripts to embed large database exports? So wa
 * 🚀 **Blazing Fast:** Built in Rust for maximum throughput on large datasets.
 * 🔄 **Parallel Processing:** Adjustable concurrency and batch‑size for embedding generation (`--num‑threads`, `--embedding‑concurrency`, `--embedding‑batch‑size`).
 * 📦 **Batch Inserts:** Configurable batch size (`-b, --batch-size-mb`) for efficient bulk loading into the target vector database.
+* 🔧 **Highly Configurable:** Fine-tune performance and behavior with extensive CLI arguments for embedding, database connections, batching, and more.
 * 📄 **Supported Dump Formats:**
   - `.sql` (MySQL, PostgreSQL, MSSQL, SQLite, Oracle)
     - **MSSQL:**
@@ -30,7 +31,6 @@ Tired of waiting hours for Python scripts to embed large database exports? So wa
   - Redis Stack
   - SurrealDB
 * ⚙️ **Pure Regex Parsing:** Fast, reliable record extraction (no AI).
-* 🔧 **Configurable:** CLI args (single source of truth—no hidden defaults).
 * 🔒 **Authentication:** Supports user/password, API key, tenants/namespaces per DB.
 * 🐞 **Debug Mode:** `--debug` prints parsed JSON records before embedding.
 
