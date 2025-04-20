@@ -10,27 +10,28 @@ Tired of waiting hours for Python scripts to embed large database exports? So wa
 
 ## Core Features
 
-* 🚀 **Blazing Fast:** Built in Rust for maximum throughput on large datasets.  
-* 🔄 **Parallel Processing:** Adjustable concurrency and batch‑size for embedding generation (`--num‑threads`, `--embedding‑concurrency`, `--embedding‑batch‑size`).  
-* 📄 **Supported Dump Formats:**  
-  - `.sql` (MySQL, PostgreSQL, MSSQL, SQLite, Oracle)  
-    - **MSSQL:**  
+* 🚀 **Blazing Fast:** Built in Rust for maximum throughput on large datasets.
+* 🔄 **Parallel Processing:** Adjustable concurrency and batch‑size for embedding generation (`--num‑threads`, `--embedding‑concurrency`, `--embedding‑batch‑size`).
+* 📦 **Batch Inserts:** Configurable batch size (`-b, --batch-size-mb`) for efficient bulk loading into the target vector database.
+* 📄 **Supported Dump Formats:**
+  - `.sql` (MySQL, PostgreSQL, MSSQL, SQLite, Oracle)
+    - **MSSQL:**
       ```bash
       sqlcmd -S server -U user -P pass -Q "SET NOCOUNT ON; SELECT * FROM dbo.TableName;" -o dump.sql
-      ```  
-    - *Oracle requires exporting via SQL Developer or similar into standard SQL.*  
-  - `.surql` (SurrealDB)  
-* 🧠 **Local Embeddings:** Uses Ollama (`--embedding-model`) to generate vectors.  
-* 💾 **Vector DB Targets:** Inserts vectors + metadata into:  
-  - Chroma  
-  - Milvus  
-  - Pinecone  
-  - Qdrant  
-  - Redis Stack  
-  - SurrealDB  
-* ⚙️ **Pure Regex Parsing:** Fast, reliable record extraction (no AI).  
-* 🔧 **Configurable:** CLI args (single source of truth—no hidden defaults).  
-* 🔒 **Authentication:** Supports user/password, API key, tenants/namespaces per DB.  
+      ```
+    - *Oracle requires exporting via SQL Developer or similar into standard SQL.*
+  - `.surql` (SurrealDB)
+* 🧠 **Local Embeddings:** Uses Ollama (`--embedding-model`) to generate vectors.
+* 💾 **Vector DB Targets:** Inserts vectors + metadata into:
+  - Chroma
+  - Milvus
+  - Pinecone
+  - Qdrant
+  - Redis Stack
+  - SurrealDB
+* ⚙️ **Pure Regex Parsing:** Fast, reliable record extraction (no AI).
+* 🔧 **Configurable:** CLI args (single source of truth—no hidden defaults).
+* 🔒 **Authentication:** Supports user/password, API key, tenants/namespaces per DB.
 * 🐞 **Debug Mode:** `--debug` prints parsed JSON records before embedding.
 
 ---
