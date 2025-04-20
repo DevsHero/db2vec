@@ -28,8 +28,8 @@ docker run -d \
 Official docs: https://surrealdb.com/docs/surrealdb/installation/running/docker
 
 ```bash
-docker run --rm --pull always \
-  -p 80:8000 \
+docker run -d --rm --pull always \
+  -p 8000:8000 \
   -v /mydata:/mydata \
   surrealdb/surrealdb:latest \
   start --user root --pass root
@@ -68,7 +68,7 @@ docker run -d \
 Official docs: https://docs.trychroma.com/production/containers/docker
 
 ```bash
-docker run \
+docker run -d \
   -v ./chroma-data:/data \
   -p 8000:8000 \
   chromadb/chroma
@@ -81,7 +81,7 @@ docker run \
 Official docs: https://qdrant.tech/documentation/quickstart/
 
 ```bash
-docker run \
+docker run -d \
   -p 6333:6333 \
   -p 6334:6334 \
   -v "$(pwd)/qdrant_storage:/qdrant/storage:z" \

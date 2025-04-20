@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Tired of waiting hours for Python scripts to embed large database exports? So was I. Processing millions of records demands performance that interpreted languages often struggle to deliver. That's why `db2vec` was born – a high‑performance Rust tool that parses your database dumps, generates vector embeddings via a local Ollama model, and loads them into your vector database of choice.
+Tired of waiting hours for Python scripts to embed large database exports? So was I. Processing millions of records demands performance that interpreted languages often struggle to deliver. That's why `db2vec` was born – a high‑performance Rust tool that parses your database dumps, generates vector embeddings via a local Ollama model (in parallel!), and loads them into your vector database of choice.
 
 ![db2vec CLI running](assets/db2vec_screenshot.png)
 
@@ -11,25 +11,25 @@ Tired of waiting hours for Python scripts to embed large database exports? So wa
 ## Core Features
 
 * 🚀 **Blazing Fast:** Built in Rust for maximum throughput on large datasets.  
+* 🔄 **Parallel Processing:** Adjustable concurrency and batch‑size for embedding generation (`--num‑threads`, `--embedding‑concurrency`, `--embedding‑batch‑size`).  
 * 📄 **Supported Dump Formats:**  
   - `.sql` (MySQL, PostgreSQL, MSSQL, SQLite, Oracle)  
-    - **MSSQL:** Export via `sqlcmd` or `mssql-tools` into a plain `.sql` file:  
+    - **MSSQL:**  
       ```bash
       sqlcmd -S server -U user -P pass -Q "SET NOCOUNT ON; SELECT * FROM dbo.TableName;" -o dump.sql
       ```  
     - *Oracle requires exporting via SQL Developer or similar into standard SQL.*  
-
   - `.surql` (SurrealDB)  
-* 🧠 **Local Embeddings:** Uses Ollama (`EMBEDDING_MODEL`) to generate vectors.  
+* 🧠 **Local Embeddings:** Uses Ollama (`--embedding-model`) to generate vectors.  
 * 💾 **Vector DB Targets:** Inserts vectors + metadata into:  
   - Chroma  
   - Milvus  
-  - Pinecone
+  - Pinecone  
   - Qdrant  
   - Redis Stack  
   - SurrealDB  
 * ⚙️ **Pure Regex Parsing:** Fast, reliable record extraction (no AI).  
-* 🔧 **Configurable:** CLI args + `.env` support (see Configuration).  
+* 🔧 **Configurable:** CLI args (single source of truth—no hidden defaults).  
 * 🔒 **Authentication:** Supports user/password, API key, tenants/namespaces per DB.  
 * 🐞 **Debug Mode:** `--debug` prints parsed JSON records before embedding.
 
@@ -53,12 +53,17 @@ Tired of waiting hours for Python scripts to embed large database exports? So wa
 Use CLI flags or `.env` (CLI always wins).  
 
 ```env
-EMBEDDING_URL="http://localhost:11434/api/embeddings"
-EMBEDDING_MODEL="nomic-embed-text-384-v2"
+EMBEDDING_URL="http://localhost:11434"
+EMBEDDING_MODEL="nomic-embed-text"
+EMBEDDING_MAX_CONCURRENCY=4
+EMBEDDING_BATCH_SIZE=16
+EMBEDDING_MAX_TOKENS=8000
+EMBEDDING_TIMEOUT=60
+NUM_THREADS=0  
 HOST="redis://127.0.0.1:6379"
 DATABASE="default_database"
 COLLECTION="my_collection"
-DIMENSION=384
+DIMENSION=768
 TENANT="default_tenant"
 NAMESPACE="default_namespace"
 METRIC="cosine"
@@ -129,23 +134,28 @@ cargo run -- [OPTIONS]
 
 **Options:**
 
-* `-f, --data-file <FILE>`      Path to `.sql`/`.surql` dump [default: `./surreal.surql`]
-* `-t, --db-export-type <TYPE>` `redis|chroma|milvus|qdrant|surreal|pinecone` [default: `redis`]
-* `--host <HOST>`               Target DB URL/host [env: `HOST`]
-* `--database <DATABASE>`       (Chroma/SurrealDB) [env: `DATABASE`]
-* `--collection <COLLECTION>`   (Milvus, Qdrant, Chroma, Pinecone) [env: `COLLECTION`]
-* `--dimension <DIMENSION>`     Vector dim (must match model) [env: `DIMENSION`]
-* `--embedding-model <MODEL>`   Ollama model name [env: `EMBEDDING_MODEL`]
-* `--metric <METRIC>`           (Pinecone) `cosine|euclidean|dotproduct` [env: `METRIC`]
-* `--tenant <TENANT>`           (Chroma) [env: `TENANT`]
-* `--namespace <NAMESPACE>`     (SurrealDB, Pinecone) [env: `NAMESPACE`]
-* `--use-auth`                  Enable auth for DB
-* `-u, --user <USER>`           Username (Milvus, SurrealDB)
-* `-p, --pass <PASS>`           Password (Milvus, SurrealDB, Redis)
-* `-k, --secret <SECRET>`       API key/token (Chroma, Qdrant, Pinecone)
-* `--debug`                     Print parsed records
-* `-h, --help`                  Show help
-* `-V, --version`               Show version
+* `-f, --data-file <FILE>`               Path to `.sql`/`.surql` dump [default: `./surreal.surql`]
+* `-t, --db-export-type <TYPE>`          `redis|chroma|milvus|qdrant|surreal|pinecone` [default: `redis`]
+* `-u, --user <USER>`                    Username for DB auth [default: `root`]
+* `-p, --pass <PASS>`                    Password for DB auth [default: `""`]
+* `-k, --secret <SECRET>`                API key/token for DB auth [default: `""`]
+* `--use-auth`                           Enable authentication [default: `false`]
+* `--debug`                              Enable debug mode [default: `false`]
+* `--host <HOST>`                        Target DB URL/host [env: `HOST`, default: `redis://127.0.0.1:6379`]
+* `--database <DATABASE>`                Target DB name [env: `DATABASE`, default: `default_database`]
+* `--collection <COLLECTION>`            Target collection/index [env: `COLLECTION`, default: `my_collection`]
+* `--tenant <TENANT>`                    (Chroma) Tenant name [env: `TENANT`, default: `default_tenant`]
+* `--namespace <NAMESPACE>`              (SurrealDB/Pinecone) Namespace [env: `NAMESPACE`, default: `default_namespace`]
+* `--dimension <DIMENSION>`              Vector dimension [env: `DIMENSION`, default: `768`]
+* `--metric <METRIC>`                    Distance metric (Pinecone) `cosine|euclidean|dotproduct` [env: `METRIC`, default: `cosine`]
+* `-b, --batch-size-mb <MB>`             Batch size in MB for bulk inserts [default: `12`]
+* `--embedding-model <MODEL>`            Ollama model name [env: `EMBEDDING_MODEL`, default: `nomic-embed-text`]
+* `--embedding-url <URL>`                Embedding API endpoint [env: `EMBEDDING_URL`, default: `http://localhost:11434`]
+* `--embedding-max-concurrency <N>`      Max parallel embedding requests [env: `EMBEDDING_MAX_CONCURRENCY`, default: `4`]
+* `--embedding-batch-size <N>`           Prompts per batch API call [env: `EMBEDDING_BATCH_SIZE`, default: `16`]
+* `--embedding-max-tokens <N>`           Text truncation limit [env: `EMBEDDING_MAX_TOKENS`, default: `8000`]
+* `--embedding-timeout <SEC>`            Ollama request timeout [env: `OLLAMA_TIMEOUT`, default: `60`]
+* `--num-threads <N>`                    CPU threads for parallel parsing (0=auto-detect) [env: `NUM_THREADS`, default: `0`]
 
 ---
 

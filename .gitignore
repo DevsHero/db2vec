@@ -5,3 +5,4 @@
 /chroma-data
 history.txt
 milvus.yaml
+qdrant_storage

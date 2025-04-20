@@ -1,8 +1,7 @@
 use reqwest::blocking::Client;
 use serde_json::{ Value, json };
-use std::error::Error;
 use log::{ info, warn, error };
-use super::Database;
+use super::{ Database, DbError };
 pub struct Args {
     pub host: String,
     pub index: String,
@@ -23,7 +22,7 @@ pub struct PineconeDatabase {
 }
 
 impl PineconeDatabase {
-    pub fn new(args: &crate::cli::Args) -> Result<Self, Box<dyn Error>> {
+    pub fn new(args: &crate::cli::Args) -> Result<Self, DbError> {
         let client = Client::new();
         let api_version = "2025-04".to_string();
         let pd = PineconeDatabase {
@@ -43,7 +42,13 @@ impl PineconeDatabase {
                 .header("Api-Key", pd.api_key.as_ref().unwrap())
                 .header("X-Pinecone-API-Version", &pd.api_version);
         }
-        if let Ok(existing) = list_req.send().and_then(|r| r.json::<Vec<String>>()) {
+
+        if
+            let Ok(existing) = list_req
+                .send()
+                .map_err(|e| Box::new(e) as DbError)
+                .and_then(|r| r.json::<Vec<String>>().map_err(|e| Box::new(e) as DbError))
+        {
             if existing.contains(&pd.index) {
                 let desc_url = format!("{}/indexes/{}", pd.host, pd.index);
                 let mut desc_req = pd.client.get(&desc_url);
@@ -52,7 +57,15 @@ impl PineconeDatabase {
                         .header("Api-Key", pd.api_key.as_ref().unwrap())
                         .header("X-Pinecone-API-Version", &pd.api_version);
                 }
-                if let Ok(info) = desc_req.send().and_then(|r| r.json::<serde_json::Value>()) {
+
+                if
+                    let Ok(info) = desc_req
+                        .send()
+                        .map_err(|e| Box::new(e) as DbError)
+                        .and_then(|r|
+                            r.json::<serde_json::Value>().map_err(|e| Box::new(e) as DbError)
+                        )
+                {
                     if let Some(curr_dim) = info.get("dimension").and_then(|d| d.as_u64()) {
                         if (curr_dim as usize) != args.dimension {
                             warn!(
@@ -68,7 +81,7 @@ impl PineconeDatabase {
                                     .header("Api-Key", pd.api_key.as_ref().unwrap())
                                     .header("X-Pinecone-API-Version", &pd.api_version);
                             }
-                            let _ = del_req.send();
+                            let _ = del_req.send().map_err(|e| Box::new(e) as DbError);
                         }
                     }
                 }
@@ -86,42 +99,82 @@ impl PineconeDatabase {
         let mut req = pd.client.post(&url).header("Content-Type", "application/json");
         if !pd.use_auth {
             req = req
-                .header("Api-Key", pd.api_key.as_ref().ok_or("API key required for cloud")?)
+                .header(
+                    "Api-Key",
+                    pd.api_key
+                        .as_ref()
+                        .ok_or_else(|| -> DbError { "API key required for cloud".into() })?
+                )
                 .header("X-Pinecone-API-Version", &pd.api_version);
         }
-        let resp = req.json(&payload).send()?;
+
+        let resp = req
+            .json(&payload)
+            .send()
+            .map_err(|e| Box::new(e) as DbError)?;
+
         if resp.status().is_success() {
             info!("Created Pinecone index `{}`", pd.index);
         } else {
-            warn!("Index `{}` creation responded {}: {}", pd.index, resp.status(), resp.text()?);
+            warn!(
+                "Index `{}` creation responded {}: {}",
+                pd.index,
+                resp.status(),
+                resp.text().map_err(|e| Box::new(e) as DbError)?
+            );
         }
 
         Ok(pd)
     }
+}
+impl Database for PineconeDatabase {
+    fn connect(_url: &str) -> Result<Self, DbError> where Self: Sized {
+        unimplemented!("Use PineconeDatabase::new(&args) instead");
+    }
 
-    pub fn upsert_vector(
+    fn store_vector(
         &self,
-        id: &str,
-        vector: Vec<f32>,
-        metadata: Option<Value>
-    ) -> Result<(), Box<dyn Error>> {
-        let url = format!("{}/vectors/upsert", self.host);
-        let mut record = json!({
-            "id": id,
-            "values": vector
-        });
-        if let Some(meta) = metadata {
-            record["metadata"] = meta;
+        table: &str,
+        items: &[(String, Vec<f32>, Value)]
+    ) -> Result<(), DbError> {
+        if items.is_empty() {
+            return Ok(());
         }
+
+        let url = format!("{}/vectors/upsert", self.host);
+        let vectors: Vec<Value> = items
+            .iter()
+            .map(|(id, vector, data)| {
+                let mut record =
+                    json!({
+                    "id": format!("{}:{}", table, id),
+                    "values": vector
+                });
+
+                let mut processed_metadata = json!({});
+                if let Some(map) = data.as_object() {
+                    for (k, v) in map {
+                        if v.is_object() || v.is_array() {
+                            processed_metadata[k] = Value::String(
+                                serde_json::to_string(v).unwrap_or_default()
+                            );
+                        } else {
+                            processed_metadata[k] = v.clone();
+                        }
+                    }
+                }
+                record["metadata"] = processed_metadata;
+                record
+            })
+            .collect();
 
         let payload =
             json!({
-            "vectors": [ record ],
+            "vectors": vectors,
             "namespace": self.namespace
         });
 
         let mut req = self.client.post(&url).header("Content-Type", "application/json");
-
         if !self.use_auth {
             req = req
                 .header("Api-Key", self.api_key.as_ref().unwrap())
@@ -133,78 +186,15 @@ impl PineconeDatabase {
             let j: Value = resp.json()?;
             let count = j
                 .get("upsertedCount")
-                .and_then(|c| c.as_i64())
+                .and_then(|c| c.as_u64())
                 .unwrap_or(0);
-            info!("Upserted {} vector(s) into `{}`", count, self.index);
+            info!("Pinecone: upserted {} vectors into `{}`", count, self.index);
             Ok(())
         } else {
             let status = resp.status();
             let txt = resp.text()?;
-            error!("Upsert failed ({}): {}", status, txt);
-            Err(format!("Upsert error: {}", txt).into())
+            error!("Pinecone bulk upsert failed ({}): {}", status, txt);
+            Err(format!("Pinecone bulk upsert error: {}", txt).into())
         }
-    }
-
-    pub fn upsert_text(
-        &self,
-        id: &str,
-        chunk_text: &str,
-        category: &str
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let url = format!("{}/records/namespaces/{}/upsert", self.host, self.namespace);
-
-        let rec =
-            json!({
-            "_id": id,
-            "chunk_text": chunk_text,
-            "category": category
-        });
-        let ndjson = serde_json::to_string(&rec)? + "\n";
-        let mut req = self.client.post(&url).header("Content-Type", "application/x-ndjson");
-
-        if !self.use_auth {
-            req = req
-                .header("Api-Key", self.api_key.as_ref().unwrap())
-                .header("X-Pinecone-API-Version", &self.api_version);
-        }
-
-        let resp = req.body(ndjson).send()?;
-        if resp.status().is_success() {
-            log::info!("Upserted text record `{}`", id);
-            Ok(())
-        } else {
-            let status = resp.status();
-            let txt = resp.text()?;
-            log::error!("Text upsert failed ({}): {}", status, txt);
-            Err(format!("Text upsert error: {}", txt).into())
-        }
-    }
-}
-impl Database for PineconeDatabase {
-    fn connect(_url: &str) -> Result<Self, Box<dyn Error>> where Self: Sized {
-        unimplemented!("Use PineconeDatabase::new(&args) instead");
-    }
-
-    fn store_vector(
-        &self,
-        table: &str,
-        key: &str,
-        vector: &[f32],
-        data: &Value
-    ) -> Result<(), Box<dyn Error>> {
-        let combined_id = format!("{}:{}", table, key);
-        let vec = vector.to_vec();
-        let mut processed_metadata = json!({});
-        if let Some(map) = data.as_object() {
-            for (k, v) in map {
-                if v.is_object() || v.is_array() {
-                    processed_metadata[k] = Value::String(serde_json::to_string(v)?);
-                } else {
-                    processed_metadata[k] = v.clone();
-                }
-            }
-        }
-        let metadata = Some(processed_metadata);
-        self.upsert_vector(&combined_id, vec, metadata)
     }
 }
