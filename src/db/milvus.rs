@@ -2,6 +2,7 @@ use reqwest::blocking::Client;
 use serde_json::{ Value, json };
 use std::error::Error;
 use super::Database;
+use log::{ info, warn, error };
 
 pub struct MilvusDatabase {
     url: String,
@@ -55,12 +56,12 @@ impl MilvusDatabase {
             let create_resp = create_req.send()?;
             let status = create_resp.status();
             let text = create_resp.text()?;
-            println!("Milvus create collection response: {}", text);
+            info!("Milvus create collection response: {}", text);
             if !status.is_success() {
                 return Err(format!("Failed to create Milvus collection: {}", text).into());
             }
         } else {
-            println!("Collection already exists: {}", _collection_name);
+            warn!("Collection already exists: {}", _collection_name);
         }
 
         Ok(MilvusDatabase { url, _collection_name, _dimension, token, client })
@@ -105,9 +106,9 @@ impl MilvusDatabase {
         let resp = req.send()?;
         let status = resp.status();
         let text = resp.text()?;
-        println!("Milvus insert response: {}", status);
+        info!("Milvus insert response: {}", status);
         if !status.is_success() {
-            eprintln!("Failed to insert vector (Status: {}): {}", status, text);
+            error!("Failed to insert vector (Status: {}): {}", status, text);
             return Err(format!("Failed to insert vector: {}", text).into());
         }
         Ok(())

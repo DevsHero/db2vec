@@ -1,4 +1,5 @@
 use base64::{ engine::general_purpose::STANDARD, Engine as _ };
+use log::{ info, error };
 use reqwest::blocking::Client;
 use serde_json::Value;
 use std::error::Error;
@@ -28,7 +29,7 @@ impl SurrealDatabase {
         };
 
         let define_ns_sql = format!("DEFINE NAMESPACE IF NOT EXISTS {};", ns);
-        println!("Sending DEFINE NAMESPACE: {}", define_ns_sql);
+        info!("Sending DEFINE NAMESPACE: {}", define_ns_sql);
         let mut req_ns = client
             .post(&sql_url)
             .header("Content-Type", "text/plain")
@@ -40,13 +41,13 @@ impl SurrealDatabase {
         let resp_ns = req_ns.send()?;
         let status_ns = resp_ns.status();
         let text_ns = resp_ns.text()?;
-        println!("SurrealDB DEFINE NAMESPACE response: {}", text_ns);
+        info!("SurrealDB DEFINE NAMESPACE response: {}", text_ns);
         if !status_ns.is_success() && !text_ns.contains("already exists") {
-            eprintln!("Failed to execute DEFINE NAMESPACE (Status: {}): {}", status_ns, text_ns);
+            error!("Failed to execute DEFINE NAMESPACE (Status: {}): {}", status_ns, text_ns);
         }
 
         let define_db_sql = format!("DEFINE DATABASE IF NOT EXISTS {};", db);
-        println!("Sending DEFINE DATABASE: {}", define_db_sql);
+        info!("Sending DEFINE DATABASE: {}", define_db_sql);
         let mut req_db = client
             .post(&sql_url)
             .header("Content-Type", "text/plain")
@@ -59,9 +60,9 @@ impl SurrealDatabase {
         let resp_db = req_db.send()?;
         let status_db = resp_db.status();
         let text_db = resp_db.text()?;
-        println!("SurrealDB DEFINE DATABASE response: {}", text_db);
+        info!("SurrealDB DEFINE DATABASE response: {}", text_db);
         if !status_db.is_success() && !text_db.contains("already exists") {
-            eprintln!("Failed to execute DEFINE DATABASE (Status: {}): {}", status_db, text_db);
+            error!("Failed to execute DEFINE DATABASE (Status: {}): {}", status_db, text_db);
         }
 
         Ok(SurrealDatabase { url: base_url, ns, db, auth_header, client })
@@ -93,9 +94,9 @@ impl SurrealDatabase {
         let resp = req.send()?;
         let status = resp.status();
         let text = resp.text()?;
-        println!("SurrealDB create response: {}", status);
+        info!("SurrealDB create response: {}", status);
         if !status.is_success() {
-            eprintln!("Failed to create record (Status: {}): {}", status, text);
+            error!("Failed to create record (Status: {}): {}", status, text);
         }
         Ok(())
     }

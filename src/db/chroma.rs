@@ -1,3 +1,4 @@
+use log::{ info, warn };
 use reqwest::blocking::Client;
 use serde_json::Value;
 use std::error::Error;
@@ -65,9 +66,9 @@ impl ChromaDatabase {
         }
         let col_resp = col_req.send()?;
         if col_resp.status().is_success() {
-            println!("Collection created: {}", _collection_name);
+            info!("Collection created: {}", _collection_name);
         } else if col_resp.status().as_u16() == 409 {
-            println!("Collection already exists: {}", _collection_name);
+            warn!("Collection already exists: {}", _collection_name);
         } else {
             let err = col_resp.text()?;
             return Err(format!("Failed to create collection: {}", err).into());

@@ -1,112 +1,133 @@
+use log::{ info, warn, error, debug };
 use regex::Regex;
 use serde_json::Value;
 
 pub fn parse_surreal(chunk: &str) -> Option<Vec<Value>> {
-    println!("Using parse method: Surreal");
+    info!("Using parse method: Surreal (Revised)"); // Added "(Revised)" for clarity
     let mut records = Vec::new();
-    let insert_re = Regex::new(r"INSERT(?:\s+INTO\s+([a-zA-Z0-9_]+))?\s*\[(?s)(.*)\]\s*;").ok()?;
-    for insert_cap in insert_re.captures_iter(chunk) {
-        let table_name = insert_cap.get(1).map_or("unknown_table", |m| m.as_str());
-        let array_content = insert_cap.get(2)?.as_str();
-        let object_re = Regex::new(r"\}\s*,\s*\{").unwrap();
-        let items: Vec<String> = object_re
-            .split(array_content)
-            .map(|s| {
-                let trimmed = s.trim();
-                if !trimmed.starts_with('{') && !trimmed.ends_with('}') {
-                    if !trimmed.starts_with('{') {
-                        format!("{{{}", trimmed)
-                    } else {
-                        trimmed.to_string()
-                    }
-                } else if !trimmed.ends_with('}') {
-                    format!("{}}}", trimmed)
-                } else {
-                    trimmed.to_string()
-                }
-            })
-            .collect();
+    // Regex to capture the table name and the array content within INSERT [...]
+    let insert_re = Regex::new(r"INSERT(?:\s+INTO\s+([A-Za-z0-9_]+))?\s*\[(?s)(.*)\]\s*;").ok()?;
 
-        for item_str in items {
-            match serde_json::from_str::<serde_json::Map<String, Value>>(&item_str) {
+    for cap in insert_re.captures_iter(chunk) {
+        let table_name = cap.get(1).map_or("unknown_table", |m| m.as_str());
+        let array_body = cap.get(2)?.as_str();
+
+        // Split the array body into potential object strings
+        // Split *before* the opening brace of subsequent objects: ", {"
+        let object_splitter_re = Regex::new(r",\s*\{").unwrap();
+        let raw_parts: Vec<&str> = object_splitter_re.split(array_body.trim()).collect();
+        let mut items = Vec::new();
+
+        for (i, part) in raw_parts.into_iter().enumerate() {
+            let mut obj_str = part.trim().to_string();
+
+            // The first part should already start with '{' from the original array body
+            // Parts after the first split need '{' prepended because the split removed it
+            if i > 0 && !obj_str.starts_with('{') {
+                obj_str.insert(0, '{');
+            }
+
+            // Ensure the string looks like a complete object, defensively adding braces if needed.
+            // This primarily ensures the very first object starts correctly and all objects end correctly.
+            if !obj_str.starts_with('{') {
+                debug!("Prepending missing '{{' to part: {}", obj_str);
+                obj_str.insert(0, '{');
+            }
+            if !obj_str.ends_with('}') {
+                debug!("Appending missing '}}' to part: {}", obj_str);
+                obj_str.push('}');
+            }
+
+            // Basic validation: Check if it looks like an object
+            if obj_str.starts_with('{') && obj_str.ends_with('}') {
+                items.push(obj_str);
+            } else {
+                warn!("Skipping malformed part after split/reconstruction: {}", obj_str);
+            }
+        }
+
+        for obj_str in items {
+            // Now loop through the reconstructed items
+            debug!("Processing raw object string: {}", obj_str);
+
+            // 1) Strip entire id: field (robust regex)
+            let id_re = Regex::new(r#"(?i)(?:,\s*)?['"]?id['"]?\s*:\s*[^,}]+,?"#).unwrap();
+            let no_id = id_re.replace_all(&obj_str, "").to_string();
+            debug!("After removing ID: '{}'", no_id); // Log with quotes for clarity
+
+            // 2) Clean up aggressively after ID removal
+            let cleaned = no_id
+                .trim_matches(|c| (c == ',' || c == ' ')) // Remove leading/trailing commas/spaces
+                .replace(",,", ",") // Collapse double commas
+                .replace("{,", "{") // Fix comma after opening brace
+                .replace(",}", "}"); // Fix comma before closing brace
+
+            // Ensure it still looks like an object if content remains
+            let mut cleaned = cleaned.to_string();
+            if !cleaned.starts_with('{') && !cleaned.is_empty() {
+                cleaned.insert(0, '{');
+            }
+            if !cleaned.ends_with('}') && !cleaned.is_empty() {
+                cleaned.push('}');
+            }
+
+            // Skip if the object became empty
+            if cleaned == "{}" || cleaned.trim().is_empty() {
+                warn!("Skipping record, became empty after cleanup: {}", obj_str);
+                continue;
+            }
+            debug!("After cleanup: '{}'", cleaned); // Log with quotes
+
+            // 3) Quote keys: foo: → "foo":
+            let key_quote_re = Regex::new(r#"(?P<k>\b[a-zA-Z_][a-zA-Z0-9_]*\b)\s*:"#).unwrap();
+            let quoted_keys = key_quote_re.replace_all(&cleaned, r#""$k":"#).to_string();
+            debug!("After quoting keys: '{}'", quoted_keys); // Log with quotes
+
+            // 4) Swap single → double quotes for string values
+            let swap_quotes = quoted_keys.replace('\'', "\"");
+            debug!("After swapping quotes: '{}'", swap_quotes); // Log with quotes
+
+            // 5) Strip trailing 'f' from floats
+            let float_f_re = Regex::new(r#"(\d+\.\d+)f\b"#).unwrap();
+            let norm_floats = float_f_re.replace_all(&swap_quotes, "$1").to_string();
+            debug!("After normalizing floats: '{}'", norm_floats); // Log with quotes
+
+            let final_json_str = norm_floats;
+            debug!("Attempting to parse final JSON string: '{}'", final_json_str); // Log with quotes
+
+            // 6) Parse exactly once with serde_json
+            match serde_json::from_str::<serde_json::Map<String, Value>>(&final_json_str) {
                 Ok(mut obj) => {
-                    obj.insert("table".to_string(), Value::String(table_name.to_string()));
-                    let mut value = Value::Object(obj);
-                    clean_html_in_value(&mut value);
-                    records.push(value);
-                    continue;
+                    obj.insert("table".into(), Value::String(table_name.into()));
+                    let mut v = Value::Object(obj);
+                    clean_html_in_value(&mut v); // Assuming clean_html_in_value exists
+                    records.push(v);
+                    info!("Successfully parsed record for table '{}'", table_name);
                 }
                 Err(e) => {
-                    eprintln!("JSON parsing failed for item: {}, Error: {}", item_str, e);
+                    // Log detailed error if parsing fails
+                    error!(
+                        "Surreal JSON parse error: {} | Failed on string: `{}` | Original object string: `{}`",
+                        e,
+                        final_json_str,
+                        obj_str
+                    );
                 }
-            }
-
-            let mut record = serde_json::Map::new();
-            let kv_regex = Regex::new(
-                r#"([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*('[^']*'|\[.*?\]|\{.*?\}|[0-9.]+(?:f)?|true|false|null)"#
-            ).ok()?;
-
-            for caps in kv_regex.captures_iter(&item_str) {
-                if caps.len() < 3 {
-                    continue;
-                }
-                let key = caps.get(1).unwrap().as_str();
-                let raw_val = caps.get(2).unwrap().as_str().trim();
-
-                let value = if raw_val.starts_with('[') && raw_val.ends_with(']') {
-                    match serde_json::from_str::<Value>(raw_val) {
-                        Ok(v) => v,
-                        Err(_) => Value::String(raw_val.to_string()),
-                    }
-                } else if raw_val.starts_with('{') && raw_val.ends_with('}') {
-                    match serde_json::from_str::<Value>(raw_val) {
-                        Ok(v) => v,
-                        Err(_) => Value::String(raw_val.to_string()),
-                    }
-                } else if raw_val.starts_with('\'') && raw_val.ends_with('\'') {
-                    Value::String(raw_val.trim_matches('\'').to_string())
-                } else if let Ok(num) = raw_val.trim_end_matches('f').parse::<f64>() {
-                    if num.fract() == 0.0 {
-                        Value::Number((num as i64).into())
-                    } else {
-                        Value::Number(
-                            serde_json::Number::from_f64(num).unwrap_or_else(|| (0).into())
-                        )
-                    }
-                } else if raw_val == "true" {
-                    Value::Bool(true)
-                } else if raw_val == "false" {
-                    Value::Bool(false)
-                } else if raw_val == "null" {
-                    Value::Null
-                } else {
-                    Value::String(raw_val.to_string())
-                };
-                record.insert(key.to_string(), value);
-            }
-
-            record.insert("table".to_string(), Value::String(table_name.to_string()));
-            record.remove("id");
-
-            if record.len() > 2 {
-                let mut value = Value::Object(record);
-                clean_html_in_value(&mut value);
-                records.push(value);
-            } else {
-                println!("Warning: Regex fallback resulted in empty record for: {}", item_str);
             }
         }
     }
 
     if records.is_empty() {
+        warn!("No records were successfully parsed from the SurrealDB chunk.");
         None
     } else {
+        info!("Successfully parsed {} records from SurrealDB chunk.", records.len());
         Some(records)
     }
 }
 
 pub fn parse_mysql(chunk: &str) -> Option<Vec<Value>> {
-    println!("Using parse method: MySQL");
+    info!("Using parse method: MySQL");
     let mut records = Vec::new();
 
     let create_re = Regex::new(
@@ -146,7 +167,7 @@ pub fn parse_mysql(chunk: &str) -> Option<Vec<Value>> {
     }
 
     if table_columns.is_empty() {
-        println!("Warning: Could not parse any CREATE TABLE statements to find column names.");
+        warn!("Could not parse any CREATE TABLE statements to find column names.");
     }
 
     let insert_re = Regex::new(
@@ -160,7 +181,7 @@ pub fn parse_mysql(chunk: &str) -> Option<Vec<Value>> {
         let columns = match table_columns.get(table) {
             Some(cols) => cols,
             None => {
-                println!("Warning: Skipping INSERT for table '{}' because columns were not found.", table);
+                warn!("Skipping INSERT for table '{}' because columns were not found.", table);
                 continue;
             }
         };
@@ -195,8 +216,8 @@ pub fn parse_mysql(chunk: &str) -> Option<Vec<Value>> {
             }
 
             if fields.len() != columns.len() {
-                println!(
-                    "Warning: Mismatched number of columns ({}) and values ({}) for table '{}'. Row: '{}'",
+                warn!(
+                    "Mismatched number of columns ({}) and values ({}) for table '{}'. Row: '{}'",
                     columns.len(),
                     fields.len(),
                     table,
@@ -269,10 +290,25 @@ pub fn parse_mysql(chunk: &str) -> Option<Vec<Value>> {
                 obj.insert(col.clone(), value);
             }
 
+            let id_key = obj
+                .keys()
+                .find(|k| k.eq_ignore_ascii_case("id"))
+                .cloned();
+            if let Some(key) = id_key {
+                obj.remove(&key);
+                debug!("Removed 'id' field (key: {}) from MySQL record", key);
+            }
+
             if obj.len() > 1 {
                 let mut final_value = Value::Object(obj);
                 clean_html_in_value(&mut final_value);
                 records.push(final_value);
+            } else {
+                warn!(
+                    "Skipping MySQL record for table '{}', became empty after removing ID. Original row: '{}'",
+                    table,
+                    row
+                );
             }
         }
     }
@@ -284,7 +320,7 @@ pub fn parse_mysql(chunk: &str) -> Option<Vec<Value>> {
 }
 
 pub fn parse_postgres(content: &str) -> Option<Vec<Value>> {
-    println!("Using parse method: Postgres");
+    info!("Using parse method: Postgres");
     let mut records = Vec::new();
     let copy_re = Regex::new(
         r"COPY\s+public\.([a-zA-Z0-9_]+)\s*\(([^)]+)\)\s+FROM stdin;\n((?s:.*?))\n\\\."
@@ -307,7 +343,7 @@ pub fn parse_postgres(content: &str) -> Option<Vec<Value>> {
 
             let fields: Vec<&str> = line.split('\t').collect();
             if fields.len() != columns.len() {
-                println!(
+                warn!(
                     "Warning: Mismatched number of columns ({}) and values ({}) for table '{}' in COPY data. Line: '{}'",
                     columns.len(),
                     fields.len(),
@@ -319,6 +355,7 @@ pub fn parse_postgres(content: &str) -> Option<Vec<Value>> {
             let mut obj = serde_json::Map::new();
             obj.insert("table".to_string(), Value::String(table.to_string()));
 
+            // Populate the object
             for (col, val_str) in columns.iter().zip(fields.iter()) {
                 let value = if *val_str == r"\N" {
                     Value::Null
@@ -345,11 +382,29 @@ pub fn parse_postgres(content: &str) -> Option<Vec<Value>> {
                         .replace("\\n", "\n");
                     Value::String(unescaped_val)
                 };
-                obj.insert(col.to_string(), value);
+                obj.insert(col.trim().to_string(), value);
             }
-            let mut value = Value::Object(obj);
-            clean_html_in_value(&mut value);
-            records.push(value);
+
+            let id_key = obj
+                .keys()
+                .find(|k| k.eq_ignore_ascii_case("id"))
+                .cloned();
+            if let Some(key) = id_key {
+                obj.remove(&key);
+                debug!("Removed 'id' field (key: {}) from Postgres record", key);
+            }
+
+            if obj.len() > 1 {
+                let mut final_value = Value::Object(obj);
+                clean_html_in_value(&mut final_value);
+                records.push(final_value);
+            } else {
+                warn!(
+                    "Skipping Postgres record for table '{}', became empty after removing ID. Original line: '{}'",
+                    table,
+                    line
+                );
+            }
         }
     }
 
@@ -393,7 +448,7 @@ fn parse_postgres_array(array_str: &str) -> Option<Value> {
 }
 
 pub fn parse_oracle(content: &str) -> Option<Vec<Value>> {
-    println!("Using parse method: Oracle");
+    info!("Using parse method: Oracle");
     let mut records = Vec::new();
     let insert_re = Regex::new(r#"Insert into ([\w\.]+) \(([^)]+)\) values \(([^)]+)\);"#).ok()?;
 
@@ -403,7 +458,7 @@ pub fn parse_oracle(content: &str) -> Option<Vec<Value>> {
             .get(2)?
             .as_str()
             .split(',')
-            .map(|s| s.trim())
+            .map(|s| s.trim()) // Trim column names here
             .collect();
         let values_str = cap.get(3)?.as_str();
         let mut fields = Vec::new();
@@ -414,13 +469,17 @@ pub fn parse_oracle(content: &str) -> Option<Vec<Value>> {
             match c {
                 '\'' if !in_string => {
                     in_string = true;
+                    // Don't add the opening quote to the value
                 }
                 '\'' if in_string => {
                     if chars.peek() == Some(&'\'') {
+                        // Handle escaped single quote ''
                         current.push('\'');
-                        chars.next();
+                        chars.next(); // Consume the second quote
                     } else {
+                        // End of string
                         in_string = false;
+                        // Don't add the closing quote to the value
                     }
                 }
                 ',' if !in_string => {
@@ -430,8 +489,20 @@ pub fn parse_oracle(content: &str) -> Option<Vec<Value>> {
                 _ => current.push(c),
             }
         }
-        if !current.is_empty() {
+        if !current.is_empty() || fields.len() < columns.len() {
             fields.push(current.trim().to_string());
+        }
+
+        // Add check for column/value count mismatch
+        if fields.len() != columns.len() {
+            warn!(
+                "Mismatched number of columns ({}) and values ({}) for table '{}'. Row values: '{}'",
+                columns.len(),
+                fields.len(),
+                table,
+                values_str // Log the original values string for context
+            );
+            continue;
         }
 
         let mut obj = serde_json::Map::new();
@@ -439,20 +510,41 @@ pub fn parse_oracle(content: &str) -> Option<Vec<Value>> {
         for (col, val) in columns.iter().zip(fields.iter()) {
             let value = if val == "NULL" {
                 Value::Null
-            } else if val.starts_with('\'') && val.ends_with('\'') {
-                Value::String(val.trim_matches('\'').replace("''", "'"))
+                // Check if it looks like a number *before* checking for quotes
             } else if let Ok(n) = val.parse::<i64>() {
                 Value::Number(n.into())
             } else if let Ok(f) = val.parse::<f64>() {
-                Value::Number(serde_json::Number::from_f64(f).unwrap())
+                Value::Number(serde_json::Number::from_f64(f).unwrap_or_else(|| (0).into()))
+                // Now handle quoted strings (which were already processed by the loop above)
             } else {
-                Value::String(val.clone())
+                Value::String(val.to_string()) // Value is already unquoted and unescaped
             };
-            obj.insert(col.to_string(), value);
+            // Use trimmed column name
+            obj.insert(col.trim().to_string(), value);
         }
-        let mut value = Value::Object(obj);
-        clean_html_in_value(&mut value);
-        records.push(value);
+
+        // *** ADD THIS BLOCK TO REMOVE THE 'ID' FIELD ***
+        let id_key = obj
+            .keys()
+            .find(|k| k.eq_ignore_ascii_case("id"))
+            .cloned();
+        if let Some(key) = id_key {
+            obj.remove(&key);
+            debug!("Removed 'id' field (key: {}) from Oracle record", key);
+        }
+
+        // Check if object is not empty (excluding the 'table' field)
+        if obj.len() > 1 {
+            let mut final_value = Value::Object(obj);
+            clean_html_in_value(&mut final_value);
+            records.push(final_value);
+        } else {
+            warn!(
+                "Skipping Oracle record for table '{}', became empty after removing ID. Original values: '{}'",
+                table,
+                values_str
+            );
+        }
     }
 
     if records.is_empty() {
@@ -499,8 +591,8 @@ fn clean_html_in_value(val: &mut Value) {
         Value::String(s) => {
             if s.contains('<') && s.contains('>') {
                 *s = html2text
-                    ::from_read(s.as_bytes(), 9999)
-                    .unwrap_or_default()
+                    ::from_read(s.as_bytes(), usize::MAX)
+                    .unwrap_or_else(|_| s.clone())
                     .replace('\n', " ")
                     .split_whitespace()
                     .collect::<Vec<_>>()

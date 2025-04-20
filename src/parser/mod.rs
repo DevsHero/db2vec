@@ -3,6 +3,7 @@ use crate::cli::Args;
 
 use serde_json::Value;
 use std::error::Error;
+use log::{ info, warn, debug };
 pub mod parse_regex;
 // pub mod parse_ai;
 pub trait ExportParser {
@@ -19,7 +20,7 @@ pub fn parse_database_export(
         .filter(|s| !s.trim().is_empty())
         .collect();
 
-    println!("Found {} chunks to process", chunks.len());
+    info!("Found {} chunks to process", chunks.len());
     let mut all_records = Vec::new();
     let mut last_table = "default".to_string();
 
@@ -52,22 +53,22 @@ pub fn parse_database_export(
                     }
                 }
 
-                println!("Parsed {} records from chunk {} using regex", records.len(), i);
+                info!("Parsed {} records from chunk {} using regex", records.len(), i);
                 if args.debug {
                     for (j, rec) in records.iter().enumerate() {
-                        println!("Debug: Record {} in chunk {}: {}", j, i, rec); // Adjusted message slightly
+                        debug!("Debug: Record {} in chunk {}: {}", j, i, rec);
                     }
                 }
 
                 all_records.extend(records);
             }
             None => {
-                println!("Regex parsing failed for chunk {}", i);
+                warn!("Regex parsing failed for chunk {}", i);
             }
         }
     }
 
-    println!("Total records parsed: {}", all_records.len());
+    info!("Total records parsed: {}", all_records.len());
 
     Ok(all_records)
 }

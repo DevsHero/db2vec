@@ -7,6 +7,8 @@ Tired of waiting hours for Python scripts to embed large database exports? So wa
 
 `db2vec` parses common database export formats, generates vector embeddings using local Ollama models, and loads the data into your favorite vector database, all optimized for speed.
 
+![db2vec CLI running](assets/db2vec_screenshot)
+
 ---
 
 ## Core Features
@@ -17,6 +19,7 @@ Tired of waiting hours for Python scripts to embed large database exports? So wa
     *   `.surql` (SurrealDB)
     *   *Oracle requires export via SQL Developer or similar tool into standard SQL format.*
     *   *JSON detection as a fallback.*
+*   **Rich Type Handling:** Parses and preserves various data types from dumps, including strings, numbers, booleans, NULLs, arrays, and nested JSON objects where supported by the format.
 *   🧠 **Local Embeddings:** Integrates seamlessly with [Ollama](https://ollama.com/) to generate embeddings using your chosen models (e.g., `nomic-embed-text`).
 *   💾 **Vector DB Targets:** Stores data and vectors in popular vector databases:
     *   Chroma
@@ -136,12 +139,50 @@ cargo run -- [OPTIONS]
 
 ---
 
+## Logging & Debugging
+
+`db2vec` uses two mechanisms for providing more detailed output:
+
+1.  **General Logging (`RUST_LOG`):**
+    *   Controls the verbosity of internal status messages using the standard Rust `log` crate.
+    *   By default, logging is turned **off** (`off` level).
+    *   Set the `RUST_LOG` environment variable to `error`, `warn`, `info`, `debug`, or `trace` to see progressively more detail about internal operations (parsing steps, embedding calls, database interactions, etc.).
+
+    ```bash
+    # Example: Show informational messages
+    RUST_LOG=info ./target/release/db2vec [OPTIONS]
+
+    # Example: Show detailed debug messages from the log crate
+    RUST_LOG=debug ./target/release/db2vec [OPTIONS]
+    ```
+
+2.  **Parsed Record Output (`--debug` flag):**
+    *   A specific command-line flag `--debug` enables printing the fully parsed JSON record structure to standard output *before* it's sent for embedding.
+    *   This is useful for verifying the parser's output for specific records.
+    *   This flag operates independently of `RUST_LOG`.
+
+    ```bash
+    # Example: Print parsed records to stdout (general logging remains off by default)
+    ./target/release/db2vec --debug [OPTIONS]
+    ```
+
+**Combining Both:**
+
+You can use both `RUST_LOG` and `--debug` simultaneously to get maximum insight:
+
+```bash
+# Example: Enable detailed internal logging AND print parsed records
+RUST_LOG=debug ./target/release/db2vec --debug [OPTIONS]
+```
+
+---
+
 ## How It Works
 
 1.  **Read & Detect:** Reads the specified `--data-file` (`.sql` or `.surql`) and automatically detects the specific SQL dialect (MySQL, PostgreSQL, Oracle) or SurrealDB format.
-2.  **Parse (Regex):** Efficiently parses the file content using format-specific regular expressions, extracting records.
-3.  **Embed (Ollama):** For each record, generates a vector embedding by sending its textual representation to the configured Ollama model (`EMBEDDING_MODEL`).
-4.  **Store (Vector DB):** Connects to the target vector database (`--db-export-type`, `--host`) and inserts each record, typically including a unique ID, the generated vector, and the original data as metadata.
+2.  **Parse (Regex):** Efficiently parses the file content using format-specific regular expressions. This process extracts records while handling various value types like strings, numbers, arrays, and JSON objects present in the dump.
+3.  **Embed (Ollama):** For each record, generates a vector embedding by sending its textual representation (as JSON) to the configured Ollama model (`EMBEDDING_MODEL`).
+4.  **Store (Vector DB):** Connects to the target vector database (`--db-export-type`, `--host`) and inserts each record, typically including a unique ID, the generated vector, and the original parsed data (including complex types) as metadata.
 
 ---
 

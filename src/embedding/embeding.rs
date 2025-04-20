@@ -1,3 +1,4 @@
+use log::{ error, info, warn };
 use reqwest::blocking::Client as HttpClient;
 use std::env;
 
@@ -26,7 +27,7 @@ pub fn generate_embedding(text: &str) -> Result<Vec<f32>, Box<dyn std::error::Er
             )
             .send()?;
         if !response.status().is_success() {
-            println!("Embedding API returned status: {}", response.status());
+            warn!("Embedding API returned status: {}", response.status());
             retry_count += 1;
             std::thread::sleep(std::time::Duration::from_secs(2));
             continue;
@@ -39,10 +40,10 @@ pub fn generate_embedding(text: &str) -> Result<Vec<f32>, Box<dyn std::error::Er
                 .map(|v| v.as_f64().unwrap_or(0.0) as f32)
                 .collect();
 
-            println!("Generated embedding with {} dimensions", embedding.len());
+            info!("Generated embedding with {} dimensions", embedding.len());
             return Ok(embedding);
         } else {
-            println!("Unexpected response structure: {:?}", json);
+            error!("Unexpected response structure: {:?}", json);
             retry_count += 1;
             std::thread::sleep(std::time::Duration::from_secs(2));
         }

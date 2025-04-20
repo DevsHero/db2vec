@@ -1,3 +1,4 @@
+use log::{ info, warn };
 use reqwest::blocking::Client;
 use serde_json::{ json, Value };
 use std::env;
@@ -55,7 +56,7 @@ impl QdrantDatabase {
                     ).into()
                 );
             }
-            println!("Created Qdrant collection: {}", collection_name);
+            info!("Created Qdrant collection: {}", collection_name);
         } else if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text()?;
@@ -67,7 +68,7 @@ impl QdrantDatabase {
                 ).into()
             );
         } else {
-            println!("Qdrant collection already exists: {}", collection_name);
+            warn!("Qdrant collection already exists: {}", collection_name);
         }
 
         Ok(QdrantDatabase { client, url: qdrant_url, collection_name, api_key })
