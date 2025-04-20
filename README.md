@@ -7,7 +7,7 @@ Tired of waiting hours for Python scripts to embed large database exports? So wa
 
 `db2vec` parses common database export formats, generates vector embeddings using local Ollama models, and loads the data into your favorite vector database, all optimized for speed.
 
-![db2vec CLI running](assets/db2vec_screenshot)
+![db2vec CLI running](assets/db2vec_screenshot.png)
 
 ---
 
@@ -201,3 +201,7 @@ Contributions are welcome! If you find a bug, have a feature request, or want to
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details (or add one if missing).
+
+
+./target/release/db2vec \
+    -f surreal_sample.surql  -t redis --host 'redis://127.0.0.1:6379' --database mydb --collection mycol2 --tenant mytenant --namespace myns --dimension 768 -u root -p root --use-auth
