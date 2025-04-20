@@ -2,7 +2,7 @@ use log::{ info, warn, debug };
 use regex::Regex;
 use serde_json::Value;
 
-use crate::parser::{ parse_array, parse_regex::clean_html_in_value };
+use crate::parser::parse_regex::{ clean_html_in_value, parse_array };
 
 pub fn parse_postgres(content: &str) -> Option<Vec<Value>> {
     info!("Using parse method: Postgres");
