@@ -1,6 +1,6 @@
 # db2vec: From Database Dumps to Vector Search at Speed
 
-[![Rust](https://github.com/your-username/db2vec/actions/workflows/rust.yml/badge.svg)](https://github.com/your-username/db2vec/actions/workflows/rust.yml) <!-- Optional: Add a CI badge if you set one up -->
+ 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Tired of waiting hours for Python scripts to embed large database exports? So was I. Processing millions of records demands performance that interpreted languages often struggle to deliver. That's why `db2vec` was born – a high-performance Rust tool designed to bridge the gap between your traditional database dumps and the world of vector search, quickly and efficiently.

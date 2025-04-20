@@ -75,9 +75,8 @@ impl MilvusDatabase {
         metadata: Option<Value>
     ) -> Result<(), Box<dyn Error>> {
         let url = format!("{}/v2/vectordb/entities/insert", self.url);
-        let mut record =
-            json!({
-            "id": id, // Use the combined table:key as primary key
+        let mut record = json!({
+            "id": id, 
             "vector": vector
         });
 
@@ -98,7 +97,7 @@ impl MilvusDatabase {
         });
 
         let mut req = self.client.post(&url).json(&payload);
-        // Conditionally add the Authorization header
+
         if let Some(ref t) = self.token {
             req = req.bearer_auth(t);
         }
@@ -122,7 +121,7 @@ impl Database for MilvusDatabase {
 
     fn store_vector(
         &self,
-        table: &str, // Table name is still used for the combined key
+        table: &str,
         key: &str,
         vector: &[f32],
         data: &Value
