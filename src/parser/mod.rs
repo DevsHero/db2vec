@@ -1,6 +1,11 @@
-use parse_regex::{ parse_mysql, parse_oracle, parse_postgres, parse_surreal };
 use crate::cli::Args;
 
+use parse_regex::{
+    mysql::parse_mysql,
+    oracle::parse_oracle,
+    postgres::parse_postgres,
+    surreal::parse_surreal,
+};
 use serde_json::Value;
 use std::error::Error;
 use log::{ info, warn, debug };
@@ -130,4 +135,35 @@ pub fn parse_with_regex(chunk: &str, format: &str) -> Option<Vec<Value>> {
         "oracle" => parse_oracle(chunk),
         _ => None,
     }
+}
+pub fn parse_array(array_str: &str) -> Option<Value> {
+    let content = array_str.get(1..array_str.len() - 1)?;
+    if content.is_empty() {
+        return Some(Value::Array(vec![]));
+    }
+    let mut elements = Vec::new();
+    let mut current_element = String::new();
+    let mut chars = content.chars().peekable();
+    let mut in_quotes = false;
+    let mut escape_next = false;
+
+    while let Some(c) = chars.next() {
+        if escape_next {
+            current_element.push(c);
+            escape_next = false;
+        } else if c == '\\' {
+            escape_next = true;
+        } else if c == '"' {
+            in_quotes = !in_quotes;
+        } else if c == ',' && !in_quotes {
+            elements.push(Value::String(current_element.trim().to_string()));
+            current_element.clear();
+        } else {
+            current_element.push(c);
+        }
+    }
+
+    elements.push(Value::String(current_element.trim().to_string()));
+
+    Some(Value::Array(elements))
 }
