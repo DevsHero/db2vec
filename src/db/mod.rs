@@ -3,11 +3,13 @@ pub mod qdrant;
 pub mod chroma;
 pub mod milvus;
 pub mod surreal;
+pub mod pinecone;
 pub use redis::RedisDatabase;
 pub use milvus::MilvusDatabase;
 pub use qdrant::QdrantDatabase;
 pub use chroma::ChromaDatabase;
 pub use surreal::SurrealDatabase;
+pub use pinecone::PineconeDatabase;
 use serde_json::Value;
 use std::error::Error;
 pub trait Database {

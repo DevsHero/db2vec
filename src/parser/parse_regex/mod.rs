@@ -2,6 +2,8 @@ pub mod mysql;
 pub mod postgres;
 pub mod oracle;
 pub mod surreal;
+pub mod sqlite;
+pub mod mssql;
 use serde_json::Value;
 
 pub fn clean_html_in_value(val: &mut Value) {

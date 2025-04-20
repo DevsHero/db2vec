@@ -1,16 +1,16 @@
 use crate::cli::Args;
-
 use parse_regex::{
+    mssql::parse_mssql,
     mysql::parse_mysql,
     oracle::parse_oracle,
     postgres::parse_postgres,
+    sqlite::parse_sqlite,
     surreal::parse_surreal,
 };
 use serde_json::Value;
 use std::error::Error;
 use log::{ info, warn, debug };
 pub mod parse_regex;
-// pub mod parse_ai;
 pub trait ExportParser {
     fn parse(&self, content: &str) -> Result<Vec<Value>, Box<dyn Error>>;
 }
@@ -20,61 +20,73 @@ pub fn parse_database_export(
     format: &str,
     args: &Args
 ) -> Result<Vec<Value>, Box<dyn std::error::Error>> {
-    let chunks: Vec<&str> = content
-        .split("INSERT [")
-        .filter(|s| !s.trim().is_empty())
-        .collect();
-
-    info!("Found {} chunks to process", chunks.len());
     let mut all_records = Vec::new();
-    let mut last_table = "default".to_string();
-
-    for (i, chunk) in chunks.iter().enumerate() {
-        let chunk_text = if i > 0 { format!("INSERT [{}", chunk) } else { chunk.to_string() };
-        if format == "surreal" {
-            if
-                let Some(table_caps) = regex::Regex
-                    ::new(r"TABLE DATA:\s*([a-zA-Z0-9_]+)")
-                    .ok()
-                    .and_then(|re| re.captures(&chunk_text))
-            {
-                last_table = table_caps
-                    .get(1)
-                    .map(|m| m.as_str().to_string())
-                    .unwrap_or_else(|| last_table.clone());
+    if format == "mssql" {
+        info!("Processing MSSQL file without chunking");
+        if let Some(records) = parse_with_regex(content, format) {
+            if args.debug {
+                for (j, rec) in records.iter().enumerate() {
+                    debug!("Debug: Record {}: {}", j, rec);
+                }
             }
+            all_records.extend(records);
+        } else {
+            warn!("Regex parsing failed for the entire MSSQL content.");
         }
+    } else {
+        let chunks: Vec<&str> = content
+            .split("INSERT [")
+            .filter(|s| !s.trim().is_empty())
+            .collect();
 
-        match parse_with_regex(&chunk_text, format) {
-            Some(mut records) => {
-                if format == "surreal" {
-                    for record in records.iter_mut() {
-                        if let Some(obj) = record.as_object_mut() {
-                            obj.insert(
-                                "table".to_string(),
-                                serde_json::Value::String(last_table.clone())
-                            );
+        info!("Found {} chunks to process", chunks.len());
+        let mut last_table = "default".to_string();
+
+        for (i, chunk) in chunks.iter().enumerate() {
+            let chunk_text = if i > 0 { format!("INSERT [{}", chunk) } else { chunk.to_string() };
+            if format == "surreal" {
+                if
+                    let Some(table_caps) = regex::Regex
+                        ::new(r"TABLE DATA:\s*([a-zA-Z0-9_]+)")
+                        .ok()
+                        .and_then(|re| re.captures(&chunk_text))
+                {
+                    last_table = table_caps
+                        .get(1)
+                        .map(|m| m.as_str().to_string())
+                        .unwrap_or_else(|| last_table.clone());
+                }
+            }
+
+            match parse_with_regex(&chunk_text, format) {
+                Some(mut records) => {
+                    if format == "surreal" {
+                        for record in records.iter_mut() {
+                            if let Some(obj) = record.as_object_mut() {
+                                obj.insert(
+                                    "table".to_string(),
+                                    serde_json::Value::String(last_table.clone())
+                                );
+                            }
                         }
                     }
-                }
 
-                info!("Parsed {} records from chunk {} using regex", records.len(), i);
-                if args.debug {
-                    for (j, rec) in records.iter().enumerate() {
-                        debug!("Debug: Record {} in chunk {}: {}", j, i, rec);
+                    info!("Parsed {} records from chunk {} using regex", records.len(), i);
+                    if args.debug {
+                        for (j, rec) in records.iter().enumerate() {
+                            debug!("Debug: Record {} in chunk {}: {}", j, i, rec);
+                        }
                     }
-                }
 
-                all_records.extend(records);
-            }
-            None => {
-                warn!("Regex parsing failed for chunk {}", i);
+                    all_records.extend(records);
+                }
+                None => {
+                    warn!("Regex parsing failed for chunk {}", i);
+                }
             }
         }
     }
-
     info!("Total records parsed: {}", all_records.len());
-
     Ok(all_records)
 }
 
@@ -112,6 +124,32 @@ pub fn detect_format(file_path: &str, content: &str) -> String {
         return "postgres".to_string();
     }
 
+    // SQLite distinctive patterns
+    if
+        content.starts_with("PRAGMA foreign_keys=OFF;") ||
+        (content.contains("BEGIN TRANSACTION;") &&
+            content.contains("COMMIT;") &&
+            content.contains("CREATE TABLE") &&
+            !content.contains("ENGINE=InnoDB") &&
+            !content.contains("TABLESPACE") &&
+            content.contains("INSERT INTO ")) ||
+        content.contains("sqlite_sequence")
+    {
+        return "sqlite".to_string();
+    }
+
+    // MSSQL distinctive patterns
+    if
+        content.contains("SET ANSI_NULLS ON") ||
+        content.contains("SET QUOTED_IDENTIFIER ON") ||
+        content.contains("CREATE TABLE [dbo].") ||
+        content.contains("INSERT [dbo].") ||
+        content.contains("WITH (PAD_INDEX = OFF") ||
+        content.contains("GO")
+    {
+        return "mssql".to_string();
+    }
+
     // MySQL distinctive patterns
     if
         content.contains("ENGINE=InnoDB") ||
@@ -123,7 +161,6 @@ pub fn detect_format(file_path: &str, content: &str) -> String {
         return "mysql".to_string();
     }
 
-    // Default fallback
     "json".to_string()
 }
 
@@ -133,6 +170,8 @@ pub fn parse_with_regex(chunk: &str, format: &str) -> Option<Vec<Value>> {
         "mysql" => parse_mysql(chunk),
         "postgres" => parse_postgres(chunk),
         "oracle" => parse_oracle(chunk),
+        "sqlite" => parse_sqlite(chunk),
+        "mssql" => parse_mssql(chunk),
         _ => None,
     }
 }

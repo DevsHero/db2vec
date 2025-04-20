@@ -7,7 +7,7 @@ pub struct Args {
     #[arg(short = 'f', long, default_value = "./surreal.surql")]
     pub data_file: String,
 
-    /// Type of vector database to connect to (e.g., redis, chroma, milvus, qdrant, surreal).
+    /// Type of vector database to connect to (e.g., redis, chroma, milvus, qdrant, surreal, pinecone).
     #[arg(short = 't', long, default_value = "redis")]
     pub db_export_type: String,
 
@@ -19,7 +19,7 @@ pub struct Args {
     #[arg(short = 'p', long, default_value = "")]
     pub pass: String,
 
-    /// Secret key or API token for database authentication (Chroma Qdrant).
+    /// Secret key or API token for database authentication (Chroma, Qdrant, Pinecone).
     #[arg(short = 'k', long, default_value = "")]
     pub secret: String,
 
@@ -39,7 +39,7 @@ pub struct Args {
     #[arg(long, env = "DATABASE", default_value = "default_database")]
     pub database: String,
 
-    /// Target collection/index name within the vector database. (Milvus, Qdrant, Chroma)
+    /// Target collection/index name within the vector database. (Milvus, Qdrant, Chroma, Pinecone)
     #[arg(long, env = "COLLECTION", default_value = "my_collection")]
     pub collection: String,
 
@@ -47,11 +47,15 @@ pub struct Args {
     #[arg(long, env = "TENANT", default_value = "default_tenant")]
     pub tenant: String,
 
-    /// Namespace (used by some databases like SurrealDB).
+    /// Namespace (used by some databases like SurrealDB, Pinecone).
     #[arg(long, env = "NAMESPACE", default_value = "default_namespace")]
     pub namespace: String,
 
-    /// Dimension size of the vectors being stored. (Milvus, Qdrant, Chroma)
+    /// Dimension size of the vectors being stored. (Milvus, Qdrant, Chroma, Pinecone)
     #[arg(long, env = "DIMENSION", default_value = "768")]
     pub dimension: usize,
+
+    /// Distance metric for vector similarity (Pinecone: cosine, euclidean, dotproduct).
+    #[arg(long, env = "METRIC", default_value = "cosine")]
+    pub metric: String,
 }

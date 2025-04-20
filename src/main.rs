@@ -2,13 +2,12 @@ pub mod db;
 pub mod parser;
 pub mod embedding;
 pub mod cli;
-
-use std::fs;
-use std::time::Instant; // Import Instant
+use std::io::{ stdout, Cursor, Read, Write };
+use std::time::Instant;
 use clap::Parser;
 use crate::parser::detect_format;
 use db::redis::RedisDatabase;
-use db::ChromaDatabase;
+use db::{ ChromaDatabase, PineconeDatabase };
 use db::Database;
 use db::MilvusDatabase;
 use db::QdrantDatabase;
@@ -18,7 +17,8 @@ use parser::parse_database_export;
 use cli::Args;
 use dotenvy::dotenv;
 use log::{ info, error };
-use std::io::{ stdout, Write };
+use encoding_rs::UTF_16LE;
+use encoding_rs_io::DecodeReaderBytesBuilder;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
@@ -39,9 +39,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let clone_export_type = export_type.clone();
 
     info!("Reading file: {}", file_path);
-    let content = fs
-        ::read_to_string(&file_path)
-        .expect(&format!("Unable to read the export file: {}", file_path));
+
+    let raw = std::fs::read(&file_path)?;
+    let content = if raw.starts_with(&[0xff, 0xfe]) {
+        let mut decoder = DecodeReaderBytesBuilder::new()
+            .encoding(Some(UTF_16LE))
+            .bom_override(true)
+            .build(Cursor::new(raw));
+        let mut s = String::new();
+        decoder.read_to_string(&mut s)?;
+        s
+    } else {
+        String::from_utf8(raw)?
+    };
+
     info!("Detecting format...");
     let format = detect_format(&file_path, &content);
 
@@ -65,6 +76,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "chroma" => Box::new(ChromaDatabase::new(&args)?),
         "milvus" => Box::new(MilvusDatabase::new(&args)?),
         "surreal" => Box::new(SurrealDatabase::new(&args)?),
+        "pinecone" => Box::new(PineconeDatabase::new(&args)?),
         _ => {
             return Err("Unsupported database type".into());
         }
