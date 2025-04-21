@@ -131,6 +131,12 @@ cargo run -- [OPTIONS]
 
 # Binary
 ./target/release/db2vec [OPTIONS]
+
+# Log (info)
+RUST_LOG=info 
+
+# Debug  
+RUST_LOG=debug  --debug
 ```
 
 **Options:**
