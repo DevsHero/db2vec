@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{ AtomicUsize, Ordering };
 use std::time::Instant;
+
 pub struct MigrationStats {
     pub total_records: usize,
     pub processed_records: usize,
