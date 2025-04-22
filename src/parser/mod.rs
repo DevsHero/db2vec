@@ -1,15 +1,15 @@
 use crate::cli::Args;
-use parse_regex::{
-    mssql::parse_mssql,
-    mysql::parse_mysql,
-    oracle::parse_oracle,
-    postgres::parse_postgres,
-    sqlite::parse_sqlite,
-    surreal::parse_surreal,
-};
+
+use log::{ info, warn, debug };
+use parse_regex::mssql::parse_mssql;
+use parse_regex::mysql::parse_mysql;
+use parse_regex::oracle::parse_oracle;
+use parse_regex::postgres::parse_postgres;
+use parse_regex::sqlite::parse_sqlite;
+use parse_regex::surreal::parse_surreal;
 use serde_json::Value;
 use std::error::Error;
-use log::{ info, warn, debug };
+
 pub mod parse_regex;
 pub trait ExportParser {
     fn parse(&self, content: &str) -> Result<Vec<Value>, Box<dyn Error>>;
@@ -87,13 +87,13 @@ pub fn parse_database_export(
         }
     }
     info!("Total records parsed: {}", all_records.len());
+
     Ok(all_records)
 }
 
 pub fn detect_format(file_path: &str, content: &str) -> String {
     let _content_lower = content.to_lowercase();
 
-    // SurrealDB distinctive patterns
     if file_path.ends_with(".surql") {
         return "surreal".to_string();
     }
