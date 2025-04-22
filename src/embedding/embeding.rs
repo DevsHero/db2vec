@@ -4,6 +4,10 @@ use serde_json::{ json, Value };
 use std::{ time::Duration, sync::OnceLock };
 use rayon::prelude::*;
 use std::sync::atomic::{ AtomicUsize, Ordering };
+use std::sync::Arc;
+
+use crate::cli::Args;
+
 pub struct EmbeddingConfig {
     pub model: String,
     pub url: String,
@@ -17,6 +21,18 @@ pub struct EmbeddingConfig {
 
 static SERVICE: OnceLock<EmbeddingService> = OnceLock::new();
 static ACTIVE_REQUESTS: AtomicUsize = AtomicUsize::new(0);
+
+/// Initialize the global embedding service with configuration
+pub fn initialize_from_args(args: &Args) {
+    initialize(
+        &args.embedding_model,
+        &args.embedding_url,
+        args.embedding_batch_size,
+        args.embedding_concurrency,
+        args.embedding_max_tokens,
+        args.embedding_timeout
+    );
+}
 
 pub fn initialize(
     model: &str,
@@ -232,11 +248,99 @@ impl EmbeddingService {
     }
 }
 
-pub fn generate_embedding(
+/// Generate embedding for a single text using the global service
+pub fn generate_embedding(text: &str) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
+    if let Some(service) = SERVICE.get() {
+        service.generate_single(text)
+    } else {
+        Err("Embedding service not initialized".into())
+    }
+}
+
+/// Generate embeddings for multiple texts using the global service
+pub fn generate_embeddings_batch(
+    texts: &[String]
+) -> Result<Vec<Vec<f32>>, Box<dyn std::error::Error>> {
+    if texts.is_empty() {
+        return Ok(vec![]);
+    }
+
+    if let Some(service) = SERVICE.get() {
+        service.generate_batch(texts)
+    } else {
+        Err("Embedding service not initialized".into())
+    }
+}
+
+/// Process records and generate embeddings
+pub fn process_records_with_embeddings(
+    records: Vec<Value>,
+    embedding_counter: Arc<AtomicUsize>
+) -> Vec<(String, String, Vec<f32>, Value)> {
+    let chunk_size = SERVICE.get()
+        .map(|service| service.config.batch_size)
+        .unwrap_or(16); // Default if not initialized
+
+    let prepared_records: Vec<_> = records
+        .par_chunks(chunk_size)
+        .flat_map(|chunk| {
+            let texts: Vec<String> = chunk
+                .iter()
+                .map(|record| serde_json::to_string(record).unwrap())
+                .collect();
+
+            let embeddings = match generate_embeddings_batch(&texts) {
+                Ok(embs) => embs,
+                Err(e) => {
+                    error!("Batch embedding failed: {}, falling back to single processing", e);
+                    chunk
+                        .par_iter()
+                        .map(|record| {
+                            generate_embedding(
+                                &serde_json::to_string(record).unwrap()
+                            ).unwrap_or_default()
+                        })
+                        .collect()
+                }
+            };
+
+            // Update the embedding counter
+            embedding_counter.fetch_add(chunk.len(), Ordering::Relaxed);
+
+            // Process and return results
+            chunk
+                .iter()
+                .zip(embeddings.into_iter())
+                .map(|(record, vec)| {
+                    let id = uuid::Uuid::new_v4().to_string();
+                    let mut meta = record.clone();
+                    let table = record
+                        .get("table")
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("unknown_table")
+                        .to_string();
+
+                    if let Some(obj) = meta.as_object_mut() {
+                        obj.remove("table");
+                    }
+
+                    (table, id, vec, meta)
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    prepared_records
+}
+
+// Keep the original functions for backward compatibility but mark as deprecated
+#[deprecated(note = "Use initialize_from_args instead")]
+pub fn generate_embedding_with_params(
     text: &str,
     model: &str,
     embedding_url: &str,
-    timeout: u64
+    timeout: u64,
+    max_tokens: usize
 ) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
     if let Some(service) = SERVICE.get() {
         return service.generate_single(text);
@@ -253,7 +357,7 @@ pub fn generate_embedding(
         url: api_url,
         batch_size: 16,
         max_concurrency: 4,
-        max_tokens: 8000,
+        max_tokens,
         timeout: Duration::from_secs(timeout),
         max_retries: 3,
         retry_delay: Duration::from_secs(2),
@@ -264,12 +368,14 @@ pub fn generate_embedding(
     service.generate_single(text)
 }
 
-pub fn generate_embeddings_batch(
+#[deprecated(note = "Use initialize_from_args instead")]
+pub fn generate_embeddings_batch_with_params(
     texts: &[String],
     model: &str,
     concurrency: usize,
     embedding_url: &str,
-    timeout: u64
+    timeout: u64,
+    max_tokens: usize
 ) -> Result<Vec<Vec<f32>>, Box<dyn std::error::Error>> {
     if texts.is_empty() {
         return Ok(vec![]);
@@ -286,7 +392,7 @@ pub fn generate_embeddings_batch(
         url: api_url,
         batch_size: 16,
         max_concurrency: concurrency,
-        max_tokens: 8000,
+        max_tokens,
         timeout: Duration::from_secs(timeout),
         max_retries: 3,
         retry_delay: Duration::from_secs(2),
@@ -294,6 +400,5 @@ pub fn generate_embeddings_batch(
 
     let client = HttpClient::builder().timeout(config.timeout).build()?;
     let service = EmbeddingService { client, config };
-
     service.generate_batch(texts)
 }

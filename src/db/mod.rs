@@ -12,12 +12,30 @@ pub use surreal::SurrealDatabase;
 pub use pinecone::PineconeDatabase;
 use serde_json::Value;
 use std::error::Error;
+use crate::cli::Args;
+
 pub type DbError = Box<dyn Error + Send + Sync>;
 
 pub trait Database: Send + Sync {
     fn connect(_url: &str) -> Result<Self, DbError> where Self: Sized;
 
     fn store_vector(&self, table: &str, items: &[(String, Vec<f32>, Value)]) -> Result<(), DbError>;
+}
+
+pub fn select_database(args: &Args) -> Result<Box<dyn Database>, DbError> {
+    let database: Box<dyn Database> = match args.db_export_type.as_str() {
+        "redis" => Box::new(RedisDatabase::new(args)?),
+        "qdrant" => Box::new(QdrantDatabase::new(args)?),
+        "chroma" => Box::new(ChromaDatabase::new(args)?),
+        "milvus" => Box::new(MilvusDatabase::new(args)?),
+        "surreal" => Box::new(SurrealDatabase::new(args)?),
+        "pinecone" => Box::new(PineconeDatabase::new(args)?),
+        _ => {
+            return Err("Unsupported database type".into());
+        }
+    };
+
+    Ok(database)
 }
 
 pub fn store_in_batches(

@@ -48,6 +48,15 @@ LOCK TABLES `products` WRITE;
 /*!40000 ALTER TABLE `products` DISABLE KEYS */;
 INSERT INTO `products` VALUES (1,'Laptop','[\"electronics\", \"computer\", \"16GB RAM\"]',1299.99,'{\"brand\": \"BrandX\", \"features\": {\"color\": \"silver\", \"weight\": 2.5}}'),(2,'Phone','[\"electronics\", \"mobile\", \"Android\"]',799.50,'{\"brand\": \"BrandY\", \"features\": {\"color\": \"black\", \"weight\": 0.2}}'),(3,'Desk','[\"furniture\", \"wood\", \"large\"]',250.00,'{\"brand\": \"BrandZ\", \"features\": {\"material\": \"oak\", \"adjustable\": true}}');
 /*!40000 ALTER TABLE `products` ENABLE KEYS */;
+
+OCK TABLES `user` WRITE;
+/*!40000 ALTER TABLE `products` DISABLE KEYS */;
+INSERT INTO `user` VALUES (1,'Laptop','[\"electronics\", \"computer\", \"16GB RAM\"]',1299.99,'{\"brand\": \"BrandX\", \"features\": {\"color\": \"silver\", \"weight\": 2.5}}'),(2,'Phone','[\"electronics\", \"mobile\", \"Android\"]',799.50,'{\"brand\": \"BrandY\", \"features\": {\"color\": \"black\", \"weight\": 0.2}}'),(3,'Desk','[\"furniture\", \"wood\", \"large\"]',250.00,'{\"brand\": \"BrandZ\", \"features\": {\"material\": \"oak\", \"adjustable\": true}}');
+/*!40000 ALTER TABLE `products` ENABLE KEYS */;
+OCK TABLES `cars` WRITE;
+/*!40000 ALTER TABLE `products` DISABLE KEYS */;
+INSERT INTO `cars` VALUES (1,'Laptop','[\"electronics\", \"computer\", \"16GB RAM\"]',1299.99,'{\"brand\": \"BrandX\", \"features\": {\"color\": \"silver\", \"weight\": 2.5}}'),(2,'Phone','[\"electronics\", \"mobile\", \"Android\"]',799.50,'{\"brand\": \"BrandY\", \"features\": {\"color\": \"black\", \"weight\": 0.2}}'),(3,'Desk','[\"furniture\", \"wood\", \"large\"]',250.00,'{\"brand\": \"BrandZ\", \"features\": {\"material\": \"oak\", \"adjustable\": true}}');
+/*!40000 ALTER TABLE `products` ENABLE KEYS */;
 UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 

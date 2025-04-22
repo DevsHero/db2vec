@@ -155,14 +155,15 @@ RUST_LOG=debug  --debug
 * `--namespace <NAMESPACE>`              (SurrealDB/Pinecone) Namespace [env: `NAMESPACE`, default: `default_namespace`]
 * `--dimension <DIMENSION>`              Vector dimension [env: `DIMENSION`, default: `768`]
 * `--metric <METRIC>`                    Distance metric (Pinecone) `cosine|euclidean|dotproduct` [env: `METRIC`, default: `cosine`]
-* `-b, --batch-size-mb <MB>`             Batch size in MB for bulk inserts [default: `12`]
+* `-m, --max-payload-size-mb <MB>`       Maximum payload size in MB for database requests [default: `12`]
+* `-c, --chunk-size <N>`                 Number of items to process in each database batch [default: `10`]
 * `--embedding-model <MODEL>`            Ollama model name [env: `EMBEDDING_MODEL`, default: `nomic-embed-text`]
 * `--embedding-url <URL>`                Embedding API endpoint [env: `EMBEDDING_URL`, default: `http://localhost:11434`]
 * `--embedding-max-concurrency <N>`      Max parallel embedding requests [env: `EMBEDDING_MAX_CONCURRENCY`, default: `4`]
 * `--embedding-batch-size <N>`           Prompts per batch API call [env: `EMBEDDING_BATCH_SIZE`, default: `16`]
 * `--embedding-max-tokens <N>`           Text truncation limit [env: `EMBEDDING_MAX_TOKENS`, default: `8000`]
 * `--embedding-timeout <SEC>`            Ollama request timeout [env: `OLLAMA_TIMEOUT`, default: `60`]
-* `--num-threads <N>`                    CPU threads for parallel parsing (0=auto-detect) [env: `NUM_THREADS`, default: `0`]
+* `--num-threads <N>`                    CPU threads for parallel processing (0=auto-detect) [env: `NUM_THREADS`, default: `0`]
 
 ---
 
