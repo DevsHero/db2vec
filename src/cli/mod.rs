@@ -1,6 +1,6 @@
 use clap::Parser;
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)] // Add Clone here
 #[command(author, version, about, long_about = None)]
 pub struct Args {
     /// Path to the .sql/.surql database dump file to process
@@ -99,4 +99,11 @@ pub struct Args {
     /// CPU threads for parallel processing (0=auto-detect)
     #[arg(long, env = "NUM_THREADS", default_value = "0")]
     pub num_threads: usize,
+
+    /// Enable Redis grouping of records by table name.
+    /// If true, records will be grouped by table name ("table:profile" -> [records]).
+    /// If false, records will be stored as unique entries with a table label inserted
+    /// into the JSON (46ef6eb2-a222-486f-a869-6c220a898758 -> {label: "table:profile"}).
+    #[arg(long, default_value = "false")]
+    pub group_redis: bool,
 }
