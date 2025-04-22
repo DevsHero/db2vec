@@ -21,73 +21,74 @@ pub fn parse_database_export(
     args: &Args
 ) -> Result<Vec<Value>, Box<dyn std::error::Error>> {
     let mut all_records = Vec::new();
-    if format == "mssql" {
-        info!("Processing MSSQL file without chunking");
-        if let Some(records) = parse_with_regex(content, format) {
-            if args.debug {
-                for (j, rec) in records.iter().enumerate() {
-                    debug!("Debug: Record {}: {}", j, rec);
-                }
-            }
-            all_records.extend(records);
-        } else {
-            warn!("Regex parsing failed for the entire MSSQL content.");
+
+    // Determine chunks based on format. Some formats need the whole content.
+    let chunks: Vec<String> = match format {
+        // These formats require the full context for reliable parsing
+        "mssql" | "postgres" | "mysql" | "surreal" | "sqlite" => {
+            // <--- Added "sqlite" here
+            info!("Processing {} file without chunking", format);
+            vec![content.to_string()]
         }
-    } else {
-        let chunks: Vec<&str> = content
-            .split("INSERT [")
-            .filter(|s| !s.trim().is_empty())
-            .collect();
+        // Oracle can often be chunked by Insert statements (Keep this for now, might need review later)
+        "oracle" => {
+            content
+                .split("Insert into") // Basic split, might need refinement for complex cases
+                .filter(|s| !s.trim().is_empty())
+                .enumerate()
+                .map(|(i, s)| {
+                    if i > 0 { format!("Insert into{}", s) } else { s.to_string() }
+                })
+                .collect()
+        }
+        // Fallback for unknown or simple formats (e.g., JSON lines)
+        _ => {
+            warn!("Using default (single chunk) processing for unknown format: {}", format);
+            vec![content.to_string()]
+        }
+    };
 
-        info!("Found {} chunks to process", chunks.len());
-        let mut last_table = "default".to_string();
+    info!("Found {} chunks to process for format '{}'", chunks.len(), format);
 
-        for (i, chunk) in chunks.iter().enumerate() {
-            let chunk_text = if i > 0 { format!("INSERT [{}", chunk) } else { chunk.to_string() };
-            if format == "surreal" {
-                if
-                    let Some(table_caps) = regex::Regex
-                        ::new(r"TABLE DATA:\s*([a-zA-Z0-9_]+)")
-                        .ok()
-                        .and_then(|re| re.captures(&chunk_text))
-                {
-                    last_table = table_caps
-                        .get(1)
-                        .map(|m| m.as_str().to_string())
-                        .unwrap_or_else(|| last_table.clone());
-                }
-            }
+    for (i, chunk) in chunks.iter().enumerate() {
+        // Skip empty chunks that might result from splitting
+        if chunk.trim().is_empty() {
+            debug!("Skipping empty chunk {}", i);
+            continue;
+        }
 
-            match parse_with_regex(&chunk_text, format) {
-                Some(mut records) => {
-                    if format == "surreal" {
-                        for record in records.iter_mut() {
-                            if let Some(obj) = record.as_object_mut() {
-                                obj.insert(
-                                    "table".to_string(),
-                                    serde_json::Value::String(last_table.clone())
-                                );
-                            }
-                        }
-                    }
-
-                    info!("Parsed {} records from chunk {} using regex", records.len(), i);
+        match parse_with_regex(&chunk, format) {
+            Some(records) => {
+                if !records.is_empty() {
+                    info!("Parsed {} records from chunk {}", records.len(), i);
                     if args.debug {
                         for (j, rec) in records.iter().enumerate() {
                             debug!("Debug: Record {} in chunk {}: {}", j, i, rec);
                         }
                     }
-
                     all_records.extend(records);
+                } else {
+                    // This can happen if a chunk contains only comments or non-data SQL
+                    debug!("Regex parsing yielded 0 records for chunk {}", i);
                 }
-                None => {
-                    warn!("Regex parsing failed for chunk {}", i);
+            }
+            None => {
+                warn!("Regex parsing failed entirely for chunk {}", i);
+                if args.debug && chunk.len() < 1000 {
+                    // Avoid logging huge chunks
+                    debug!("Content of failed chunk {}:\n{}", i, chunk);
+                } else if args.debug {
+                    debug!(
+                        "Content of failed chunk {} (truncated):\n{}...",
+                        i,
+                        &chunk[..std::cmp::min(chunk.len(), 1000)]
+                    );
                 }
             }
         }
     }
-    info!("Total records parsed: {}", all_records.len());
 
+    info!("Total records parsed: {}", all_records.len());
     Ok(all_records)
 }
 
@@ -116,10 +117,12 @@ pub fn detect_format(file_path: &str, content: &str) -> String {
 
     // PostgreSQL distinctive patterns
     if
-        content.contains("COPY public.") ||
-        content.contains("OWNER TO") ||
-        content.contains("SET standard_conforming_strings") ||
-        content.contains("pg_catalog.setval")
+        (content.contains("COPY ") && content.contains(" FROM stdin;")) ||
+        content.contains("PostgreSQL database dump") ||
+        (content.contains("SET ") && content.contains("standard_conforming_strings")) ||
+        content.contains("ALTER TABLE ONLY") ||
+        (content.contains("CREATE TYPE") && content.contains("AS ENUM")) ||
+        (content.contains("CREATE SEQUENCE") && content.contains("OWNED BY"))
     {
         return "postgres".to_string();
     }

@@ -1,16 +1,53 @@
 use regex::Regex;
-use log::{ info, warn };
+use log::{ info, warn, debug };
 use serde_json::Value;
 use crate::parser::parse_regex::clean_html_in_value;
 
 pub fn parse_surreal(chunk: &str) -> Option<Vec<Value>> {
     info!("Using parse method: Surreal");
     let mut records = Vec::new();
-    let insert_re = Regex::new(r"INSERT(?:\s+INTO\s+([a-zA-Z0-9_]+))?\s*\[(?s)(.*)\]\s*;").ok()?;
 
+    let table_header_re = Regex::new(r"--\s*TABLE DATA:\s*([a-zA-Z0-9_]+)").ok()?;
+    let insert_re = Regex::new(r"INSERT\s*\[(?s)(.*?)\]\s*;").ok()?;
+
+    let mut inserts = Vec::new();
     for insert_cap in insert_re.captures_iter(chunk) {
-        let table_name = insert_cap.get(1).map_or("unknown_table", |m| m.as_str());
-        let array_content = insert_cap.get(2)?.as_str();
+        if let Some(array_content) = insert_cap.get(1) {
+            let array_text = array_content.as_str();
+            let full_match = insert_cap.get(0).unwrap().as_str();
+            inserts.push((full_match, array_text));
+        }
+    }
+
+    if inserts.is_empty() {
+        warn!("No INSERT statements found in chunk");
+        return None;
+    }
+
+    let mut table_sections = Vec::new();
+    for table_cap in table_header_re.captures_iter(chunk) {
+        if let Some(table_name) = table_cap.get(1) {
+            let pos = table_cap.get(0).unwrap().start();
+            table_sections.push((table_name.as_str().to_string(), pos));
+        }
+    }
+
+    table_sections.sort_by_key(|&(_, pos)| pos);
+
+    for (i, (insert_stmt, array_content)) in inserts.iter().enumerate() {
+        let insert_pos = chunk.find(insert_stmt).unwrap_or(0);
+        let mut table_name = "unknown_table".to_string();
+        for (t_name, t_pos) in &table_sections {
+            if *t_pos < insert_pos {
+                table_name = t_name.clone();
+            } else {
+                break;
+            }
+        }
+
+        info!("Processing INSERT #{} for table: {}", i, table_name);
+        debug!("Parsing data from table {}: {:.100}...", table_name, array_content);
+
         let object_re = Regex::new(r"\}\s*,\s*\{").unwrap();
         let items: Vec<String> = object_re
             .split(array_content)
@@ -29,12 +66,13 @@ pub fn parse_surreal(chunk: &str) -> Option<Vec<Value>> {
 
         for item_str in items {
             if let Ok(mut obj) = serde_json::from_str::<serde_json::Map<String, Value>>(&item_str) {
-                obj.insert("table".to_string(), Value::String(table_name.to_string()));
+                obj.insert("table".to_string(), Value::String(table_name.clone()));
                 let mut value = Value::Object(obj);
                 clean_html_in_value(&mut value);
                 records.push(value);
                 continue;
             }
+
             let mut record = serde_json::Map::new();
             let kv_regex = Regex::new(
                 r#"([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*('[^']*'|\[.*?\]|\{.*?\}|[0-9.]+(?:f)?|true|false|null)"#
@@ -76,7 +114,7 @@ pub fn parse_surreal(chunk: &str) -> Option<Vec<Value>> {
                 record.insert(key.to_string(), value);
             }
 
-            record.insert("table".to_string(), Value::String(table_name.to_string()));
+            record.insert("table".to_string(), Value::String(table_name.clone()));
             record.remove("id");
 
             if record.len() > 1 {
@@ -90,8 +128,10 @@ pub fn parse_surreal(chunk: &str) -> Option<Vec<Value>> {
     }
 
     if records.is_empty() {
+        warn!("No records parsed from section");
         None
     } else {
+        info!("Successfully parsed {} records", records.len());
         Some(records)
     }
 }

@@ -7,72 +7,41 @@ use crate::parser::parse_regex::{ clean_html_in_value, parse_array };
 pub fn parse_mysql(chunk: &str) -> Option<Vec<Value>> {
     info!("Using parse method: MySQL");
     let mut records = Vec::new();
-
-    let create_re = Regex::new(
-        r"(?is)CREATE TABLE\s+(?:IF NOT EXISTS\s+)?[`']?(\w+)[`']?\s*\((.*?)\)\s*(?:ENGINE=|AUTO_INCREMENT=|DEFAULT CHARSET=|COLLATE=|COMMENT=|$)"
-    ).ok()?;
-
-    let column_def_re = Regex::new(r"^\s*[`']?(\w+)[`']?").ok()?;
-    let mut table_columns = std::collections::HashMap::new();
-    for cap in create_re.captures_iter(chunk) {
-        if let (Some(table_match), Some(cols_def_match)) = (cap.get(1), cap.get(2)) {
-            let table_name = table_match.as_str();
-            let cols_def = cols_def_match.as_str();
-            let mut cols = Vec::new();
-            for line in cols_def.lines() {
-                if let Some(col_cap) = column_def_re.captures(line.trim()) {
-                    if let Some(col_name) = col_cap.get(1) {
-                        let name_upper = col_name.as_str().to_uppercase();
-                        if
-                            name_upper != "PRIMARY" &&
-                            name_upper != "KEY" &&
-                            name_upper != "CONSTRAINT" &&
-                            name_upper != "UNIQUE" &&
-                            name_upper != "FULLTEXT" &&
-                            name_upper != "SPATIAL" &&
-                            name_upper != "FOREIGN" &&
-                            !name_upper.starts_with("INDEX")
-                        {
-                            cols.push(col_name.as_str().to_string());
-                        }
-                    }
-                }
-            }
-            if !cols.is_empty() {
-                table_columns.insert(table_name.to_string(), cols);
-            }
-        }
-    }
-
-    if table_columns.is_empty() {
-        warn!("Could not parse any CREATE TABLE statements to find column names.");
-    }
-
     let insert_re = Regex::new(
-        r"(?is)INSERT INTO\s+[`']?(\w+)[`']?\s*(?:\([^)]+\))?\s*VALUES\s*(.*?);"
+        r#"(?is)INSERT INTO\s+[`'\"]?(\w+)[`'\"]?\s*(?:\(([^)]+)\))?\s*VALUES\s*(.*?);"#
     ).ok()?;
 
     let row_re = Regex::new(r"\((.*?)\)").ok()?;
 
     for cap in insert_re.captures_iter(chunk) {
         let table = cap.get(1)?.as_str();
-        let columns = match table_columns.get(table) {
-            Some(cols) => cols,
-            None => {
-                warn!("Skipping INSERT for table '{}' because columns were not found.", table);
-                continue;
-            }
+        let column_names: Vec<String> = if let Some(cols_match) = cap.get(2) {
+            cols_match
+                .as_str()
+                .split(',')
+                .map(|c|
+                    c
+                        .trim()
+                        .trim_matches(&['`', '\'', '"'][..])
+                        .to_string()
+                )
+                .collect()
+        } else {
+            Vec::new()
         };
-        let values_str = cap.get(2)?.as_str();
+
+        let values_str = cap.get(3)?.as_str();
+        let mut inferred_column_count = 0;
+        let mut first_row_processed = false;
+
         for row_cap in row_re.captures_iter(values_str) {
             let row = row_cap.get(1)?.as_str();
             let mut fields = Vec::new();
             let mut current = String::new();
             let mut in_string = false;
             let mut escape_next = false;
-            let mut chars = row.chars().peekable();
 
-            while let Some(c) = chars.next() {
+            for c in row.chars() {
                 if escape_next {
                     current.push(c);
                     escape_next = false;
@@ -89,26 +58,49 @@ pub fn parse_mysql(chunk: &str) -> Option<Vec<Value>> {
                     current.push(c);
                 }
             }
-            if !current.is_empty() || fields.len() < columns.len() {
+            if !current.is_empty() {
                 fields.push(current.trim().to_string());
             }
 
-            if fields.len() != columns.len() {
-                warn!(
-                    "Mismatched number of columns ({}) and values ({}) for table '{}'. Row: '{}'",
-                    columns.len(),
-                    fields.len(),
-                    table,
-                    row
-                );
-                continue;
-            }
+            let col_names = if !column_names.is_empty() {
+                column_names.clone()
+            } else if !first_row_processed {
+                first_row_processed = true;
+                inferred_column_count = fields.len();
+
+                let mut default_cols = Vec::with_capacity(fields.len());
+                for i in 0..fields.len() {
+                    let col_name = match i {
+                        0 => "id".to_string(),
+                        1 => "name".to_string(),
+                        2 => "description".to_string(),
+                        _ => format!("column{}", i),
+                    };
+                    default_cols.push(col_name);
+                }
+                default_cols
+            } else {
+                (0..inferred_column_count)
+                    .map(|i| {
+                        match i {
+                            0 => "id".to_string(),
+                            1 => "name".to_string(),
+                            2 => "description".to_string(),
+                            _ => format!("column{}", i),
+                        }
+                    })
+                    .collect()
+            };
 
             let mut obj = serde_json::Map::new();
             obj.insert("table".to_string(), Value::String(table.to_string()));
 
-            for (i, col) in columns.iter().enumerate() {
-                let val_str = &fields[i];
+            for (i, val_str) in fields.iter().enumerate() {
+                if i >= col_names.len() {
+                    warn!("More values than columns for table '{}', value: '{}'", table, val_str);
+                    continue;
+                }
+
                 let mut value = Value::Null;
 
                 if val_str == "NULL" {
@@ -165,7 +157,8 @@ pub fn parse_mysql(chunk: &str) -> Option<Vec<Value>> {
                 } else {
                     value = Value::String(val_str.to_string());
                 }
-                obj.insert(col.clone(), value);
+
+                obj.insert(col_names[i].clone(), value);
             }
 
             let id_key = obj
@@ -182,14 +175,11 @@ pub fn parse_mysql(chunk: &str) -> Option<Vec<Value>> {
                 clean_html_in_value(&mut final_value);
                 records.push(final_value);
             } else {
-                warn!(
-                    "Skipping MySQL record for table '{}', became empty after removing ID. Original row: '{}'",
-                    table,
-                    row
-                );
+                warn!("Skipping MySQL record for table '{}', too few fields after processing", table);
             }
         }
     }
+
     if records.is_empty() {
         None
     } else {

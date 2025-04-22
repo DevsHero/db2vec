@@ -48,6 +48,7 @@ impl Database for RedisDatabase {
         }
 
         let mut pipe = redis::pipe();
+
         for (id, vec, data) in items {
             let key = format!("{}:{}", table, id);
             let bytes = f32_vec_to_bytes(vec);

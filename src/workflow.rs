@@ -21,8 +21,6 @@ pub fn execute_migration_workflow(
     args: &Args
 ) -> Result<MigrationStats, DbError> {
     let total_records = records.len();
-    info!("Starting migration workflow for {} records", total_records);
-
     let start_time = Instant::now();
     let embedding_count = Arc::new(AtomicUsize::new(0));
     let embedding_animation = start_spinner_animation(
