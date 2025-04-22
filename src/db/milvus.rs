@@ -1,75 +1,28 @@
 use reqwest::blocking::Client;
 use serde_json::{ Value, json };
 use super::{ Database, DbError };
-use log::{ info, warn, error };
+use log::{ debug, error, info, warn };
 
 pub struct MilvusDatabase {
     url: String,
-    _collection_name: String,
-    _dimension: usize,
     token: Option<String>,
     client: Client,
+    dimension: usize,
+    db_name: String,
 }
 
 impl MilvusDatabase {
     pub fn new(args: &crate::cli::Args) -> Result<Self, DbError> {
         let url = args.host.clone();
-        let _collection_name = args.collection.clone();
-        let _dimension = args.dimension;
+        let db_name = args.database.clone();
         let token = if args.use_auth && (!args.user.is_empty() || !args.pass.is_empty()) {
             Some(format!("{}:{}", args.user, args.pass))
         } else {
             None
         };
-
         let client = Client::new();
-        let stats_url = format!("{}/v2/vectordb/collections/get_stats", url);
-        let payload = json!({ "collectionName": _collection_name });
-        let mut req = client.post(&stats_url).json(&payload);
 
-        if let Some(ref t) = token {
-            req = req.bearer_auth(t);
-        }
-
-        let resp = req.send().map_err(|e| Box::new(e) as DbError)?;
-        let resp_json: serde_json::Value = resp.json().map_err(|e| Box::new(e) as DbError)?;
-
-        let exists = resp_json.get("code").and_then(|c| c.as_i64()) == Some(0);
-
-        if !exists {
-            let create_url = format!("{}/v2/vectordb/collections/create", url);
-            let payload =
-                json!({
-                "collectionName": _collection_name,
-                "dimension": _dimension,
-                "primaryFieldName": "id",
-                "idType": "VarChar",
-                "vectorFieldName": "vector",
-                "metric_type": "L2",
-                "autoId": false,
-                "params": {
-                    "max_length": "128" 
-                }
-            });
-
-            let mut create_req = client.post(&create_url).json(&payload);
-            if let Some(ref t) = token {
-                create_req = create_req.bearer_auth(t);
-            }
-
-            let create_resp = create_req.send().map_err(|e| Box::new(e) as DbError)?;
-            let status = create_resp.status();
-            let text = create_resp.text().map_err(|e| Box::new(e) as DbError)?;
-
-            info!("Milvus create collection response: {}", text);
-            if !status.is_success() {
-                return Err(format!("Failed to create Milvus collection: {}", text).into());
-            }
-        } else {
-            warn!("Collection already exists: {}", _collection_name);
-        }
-
-        Ok(MilvusDatabase { url, _collection_name, _dimension, token, client })
+        Ok(MilvusDatabase { url, token, client, dimension: args.dimension, db_name })
     }
 }
 
@@ -80,52 +33,130 @@ impl Database for MilvusDatabase {
 
     fn store_vector(
         &self,
-        _table: &str,
+        table: &str,
         items: &[(String, Vec<f32>, Value)]
     ) -> Result<(), DbError> {
         if items.is_empty() {
             return Ok(());
         }
 
+        let stats_url = format!("{}/v2/vectordb/collections/get_stats", self.url);
+        let mut stats_req = self.client
+            .post(&stats_url)
+            .json(
+                &json!({
+                "dbName": self.db_name,
+                "collectionName": table
+            })
+            );
+        if let Some(ref t) = self.token {
+            stats_req = stats_req.bearer_auth(t);
+        }
+        let stats = stats_req.send().map_err(|e| Box::new(e) as DbError)?;
+        let stats_json: Value = stats.json().map_err(|e| Box::new(e) as DbError)?;
+        let exists = stats_json.get("code").and_then(|c| c.as_i64()) == Some(0);
+
+        if !exists {
+            info!("Creating Milvus collection '{}'", table);
+            let create_url = format!("{}/v2/vectordb/collections/create", self.url);
+            let mut create_req = self.client
+                .post(&create_url)
+                .json(
+                    &json!({
+                    "dbName": self.db_name,
+                    "collectionName": table,
+                    "dimension": self.dimension,
+                    "primaryFieldName": "id",
+                    "idType": "VarChar",
+                    "vectorFieldName": "vector",
+                    "metric_type": "L2",
+                    "autoId": false,
+                    "params": { "max_length": "128" }
+                })
+                );
+            if let Some(ref t) = self.token {
+                create_req = create_req.bearer_auth(t);
+            }
+            let resp = create_req.send().map_err(|e| Box::new(e) as DbError)?;
+            let status = resp.status();
+            let text = resp.text().map_err(|e| Box::new(e) as DbError)?;
+            if !status.is_success() {
+                return Err(
+                    format!("Failed to create Milvus collection '{}': {}", table, text).into()
+                );
+            }
+            info!("Milvus collection '{}' created", table);
+        }
+
         let data: Vec<Value> = items
             .iter()
             .map(|(id, vec, meta)| {
-                let mut rec =
-                    json!({
-                    "id": id,
-                    "vector": vec
-                });
-                if let Some(obj) = meta.as_object() {
-                    for (k, v) in obj {
+                let v = if vec.len() == self.dimension {
+                    vec.clone()
+                } else {
+                    warn!(
+                        "ID='{}': vector length {} ≠ {}, filling with zeros",
+                        id,
+                        vec.len(),
+                        self.dimension
+                    );
+                    vec![0.0; self.dimension]
+                };
+
+                let mut obj = json!({ "id": id, "vector": v });
+                if let Some(map) = meta.as_object() {
+                    for (k, v) in map.iter() {
                         if k != "id" && k != "vector" {
-                            rec[k] = v.clone();
+                            obj[k] = v.clone();
                         }
                     }
                 }
-                rec
+                obj
             })
             .collect();
 
-        let payload =
-            json!({
-            "collectionName": self._collection_name,
-            "data": data
-        });
-
-        let url = format!("{}/v2/vectordb/entities/insert", self.url);
-        let mut req = self.client.post(&url).json(&payload);
+        let insert_url = format!("{}/v2/vectordb/entities/insert", self.url);
+        let mut ins_req = self.client
+            .post(&insert_url)
+            .json(
+                &json!({
+                "dbName": self.db_name,
+                "collectionName": table,
+                "data": data
+            })
+            );
         if let Some(ref t) = self.token {
-            req = req.bearer_auth(t);
+            ins_req = ins_req.bearer_auth(t);
+        }
+        let ins_res = ins_req.send()?;
+        let status = ins_res.status();
+        let resp_text = ins_res.text()?;
+        debug!("Milvus insert response ({}): {}", status, resp_text);
+        if !status.is_success() {
+            error!("Milvus insert failed for '{}': {}", table, resp_text);
+            return Err(format!("Milvus insert failed: {}", resp_text).into());
+        }
+        info!("Milvus: inserted {} vectors into '{}'", items.len(), table);
+        let flush_url = format!("{}/v2/vectordb/collections/flush", self.url);
+        let mut flush_req = self.client
+            .post(&flush_url)
+            .json(
+                &json!({
+                "dbName": self.db_name,
+                "collectionName": table
+            })
+            );
+        if let Some(ref t) = self.token {
+            flush_req = flush_req.bearer_auth(t);
+        }
+        let flush_res = flush_req.send()?;
+        if !flush_res.status().is_success() {
+            let err = flush_res.text()?;
+            warn!("Milvus flush failed for '{}': {}", table, err);
+        } else {
+            info!("Milvus: flushed collection '{}'", table);
         }
 
-        let resp = req.send()?;
-        if !resp.status().is_success() {
-            let txt = resp.text()?;
-            error!("Milvus batch insert failed: {}", txt);
-            return Err(format!("Milvus batch insert failed: {}", txt).into());
-        }
-
-        info!("Milvus: inserted {} vectors", items.len());
         Ok(())
     }
 }
