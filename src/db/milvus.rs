@@ -9,20 +9,37 @@ pub struct MilvusDatabase {
     client: Client,
     dimension: usize,
     db_name: String,
+    metric: String, // l2 , cosine, IP
 }
 
 impl MilvusDatabase {
     pub fn new(args: &crate::cli::Args) -> Result<Self, DbError> {
         let url = args.host.clone();
         let db_name = args.database.clone();
-        let token = if args.use_auth && (!args.user.is_empty() || !args.pass.is_empty()) {
-            Some(format!("{}:{}", args.user, args.pass))
+        let token = if args.use_auth {
+            if !args.secret.is_empty() {
+                Some(args.secret.clone())
+            } else if !args.user.is_empty() || !args.pass.is_empty() {
+                Some(format!("{}:{}", args.user, args.pass))
+            } else {
+                None
+            }
         } else {
             None
         };
         let client = Client::new();
 
-        Ok(MilvusDatabase { url, token, client, dimension: args.dimension, db_name })
+        let metric = match args.metric.to_uppercase().as_str() {
+            "COSINE" | "IP" | "L2" => args.metric.to_uppercase(),
+            "COSINE_SIMILARITY" => "COSINE".to_string(),
+            "DOT_PRODUCT" => "IP".to_string(),
+            "EUCLIDEAN" => "L2".to_string(),
+            _ => {
+                return Err("Invalid metric type".into());
+            }
+        };
+
+        Ok(MilvusDatabase { url, token, client, dimension: args.dimension, db_name, metric })
     }
 }
 
@@ -38,6 +55,52 @@ impl Database for MilvusDatabase {
     ) -> Result<(), DbError> {
         if items.is_empty() {
             return Ok(());
+        }
+
+        let db_list_url = format!("{}/v2/vectordb/databases", self.url);
+        let mut db_list_req = self.client.get(&db_list_url);
+        if let Some(ref t) = self.token {
+            db_list_req = db_list_req.bearer_auth(t);
+        }
+
+        let db_list_resp = db_list_req.send().map_err(|e| Box::new(e) as DbError)?;
+        if db_list_resp.status().is_success() {
+            let db_list: Value = db_list_resp.json().map_err(|e| Box::new(e) as DbError)?;
+            let db_exists = db_list
+                .get("data")
+                .and_then(|data| data.as_array())
+                .map(|dbs|
+                    dbs
+                        .iter()
+                        .any(|db| db.get("name").and_then(|n| n.as_str()) == Some(&self.db_name))
+                )
+                .unwrap_or(false);
+
+            if !db_exists {
+                info!("Creating Milvus database '{}'", self.db_name);
+                let create_db_url = format!("{}/v2/vectordb/databases/create", self.url);
+                let mut create_db_req = self.client
+                    .post(&create_db_url)
+                    .json(&json!({"dbName": self.db_name}));
+
+                if let Some(ref t) = self.token {
+                    create_db_req = create_db_req.bearer_auth(t);
+                }
+
+                let create_db_resp = create_db_req.send().map_err(|e| Box::new(e) as DbError)?;
+                if !create_db_resp.status().is_success() {
+                    let err = create_db_resp.text().map_err(|e| Box::new(e) as DbError)?;
+                    return Err(
+                        format!(
+                            "Failed to create Milvus database '{}': {}",
+                            self.db_name,
+                            err
+                        ).into()
+                    );
+                }
+
+                info!("Milvus database '{}' created successfully", self.db_name);
+            }
         }
 
         let stats_url = format!("{}/v2/vectordb/collections/get_stats", self.url);
@@ -69,7 +132,7 @@ impl Database for MilvusDatabase {
                     "primaryFieldName": "id",
                     "idType": "VarChar",
                     "vectorFieldName": "vector",
-                    "metric_type": "L2",
+                    "metricType": self.metric,  
                     "autoId": false,
                     "params": { "max_length": "128" }
                 })

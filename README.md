@@ -63,7 +63,6 @@ EMBEDDING_TIMEOUT=60
 NUM_THREADS=0  
 HOST="redis://127.0.0.1:6379"
 DATABASE="default_database"
-COLLECTION="my_collection"
 DIMENSION=768
 TENANT="default_tenant"
 NAMESPACE="default_namespace"
@@ -93,8 +92,7 @@ METRIC="cosine"
      -t milvus \
      --host http://127.0.0.1:19530 \
      --database mydb \
-     --collection mycol \
-     --dimension 768 \
+     --dimension 768 \              # Must match nomic-embed-text's output dimension
      --embedding-model nomic-embed-text \
      -u root \
      -p secret \
@@ -106,9 +104,8 @@ METRIC="cosine"
      -f mssql_dump.sql \
      -t pinecone \
      --host <INDEX_HOST> \
-     --collection my-index \
      --namespace myns \
-     --dimension 384 \
+     --dimension 384 \              # Must match nomic-embed-text-384-v2's output dimension
      --embedding-model nomic-embed-text-384-v2 \
      --metric cosine \
      -k <API_KEY> \
@@ -118,7 +115,8 @@ METRIC="cosine"
    ./target/release/db2vec \
      -f sqlite_dump.sql \
      -t redis \
-     --host redis://127.0.0.1:6379
+     --host redis://127.0.0.1:6379 \
+     --group-redis  # Group records by table name
    ```
 
 ---
@@ -150,11 +148,10 @@ RUST_LOG=debug  --debug
 * `--debug`                              Enable debug mode [default: `false`]
 * `--host <HOST>`                        Target DB URL/host [env: `HOST`, default: `redis://127.0.0.1:6379`]
 * `--database <DATABASE>`                Target DB name [env: `DATABASE`, default: `default_database`]
-* `--collection <COLLECTION>`            Target collection/index [env: `COLLECTION`, default: `my_collection`]
 * `--tenant <TENANT>`                    (Chroma) Tenant name [env: `TENANT`, default: `default_tenant`]
 * `--namespace <NAMESPACE>`              (SurrealDB/Pinecone) Namespace [env: `NAMESPACE`, default: `default_namespace`]
 * `--dimension <DIMENSION>`              Vector dimension [env: `DIMENSION`, default: `768`]
-* `--metric <METRIC>`                    Distance metric (Pinecone) `cosine|euclidean|dotproduct` [env: `METRIC`, default: `cosine`]
+* `--metric <METRIC>`                    Distance metric  example `ip|cosine|euclidean|dotproduct` [env: `METRIC`, default: `cosine`]
 * `-m, --max-payload-size-mb <MB>`       Maximum payload size in MB for database requests [default: `12`]
 * `-c, --chunk-size <N>`                 Number of items to process in each database batch [default: `10`]
 * `--embedding-model <MODEL>`            Ollama model name [env: `EMBEDDING_MODEL`, default: `nomic-embed-text`]
@@ -164,6 +161,7 @@ RUST_LOG=debug  --debug
 * `--embedding-max-tokens <N>`           Text truncation limit [env: `EMBEDDING_MAX_TOKENS`, default: `8000`]
 * `--embedding-timeout <SEC>`            Ollama request timeout [env: `OLLAMA_TIMEOUT`, default: `60`]
 * `--num-threads <N>`                    CPU threads for parallel processing (0=auto-detect) [env: `NUM_THREADS`, default: `0`]
+* `--group-redis`                        Group Redis records by table name (vs storing as individual entries) [default: `false`]
 
 ---
 
@@ -178,7 +176,29 @@ Run supported vector DBs locally via Docker – see [DOCKER_SETUP.md](DOCKER_SET
 1. **Read & Detect:** Load dump (`.sql`/`.surql`), detect SQL dialect or SurrealDB.  
 2. **Parse (Regex):** Extract records and types.  
 3. **Embed:** Call Ollama with `EMBEDDING_MODEL` to get vectors.  
-4. **Store:** Insert into your vector DB with metadata.
+4. **Auto-Schema:** Automatically create:
+   - Target database if it doesn't exist 
+   - Collections/indices from table names in the dump
+   - Proper dimension settings based on your `--dimension` parameter
+   - Distance metrics using your specified `--metric` value
+5. **Store:** Insert into your vector DB with metadata.
+
+---
+
+## Automatic Collection Creation
+
+For each table in your source data dump, `db2vec` automatically:
+
+* Creates a corresponding collection/index in the target vector database
+* Names the collection after the source table name
+* Configures proper dimensions and metric type based on your CLI arguments
+* Creates the database first if it doesn't exist
+
+This zero-config schema creation means you don't need to manually set up your vector database structure before import.
+
+> **Note:** When using Redis with `--group-redis`, collections aren't created in the traditional sense. Instead, records are grouped by table name into Redis data structures (e.g., `table:profile` → [records]). Without this flag, Redis stores each record as an individual entry with a table label in the metadata.
+> 
+> **Warning:** If collections already exist, their dimension must match the `--dimension` parameter you provide. Some databases like Pinecone will reject vectors with mismatched dimensions, causing the import to fail.
 
 ---
 

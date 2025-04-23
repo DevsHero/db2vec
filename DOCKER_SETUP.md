@@ -14,7 +14,7 @@ docker run -d \
   -e PORT=5081 \
   -e INDEX_TYPE=serverless \
   -e VECTOR_TYPE=dense \
-  -e DIMENSION=2 \
+  -e DIMENSION=768 \
   -e METRIC=cosine \
   -p 5081:5081 \
   --platform linux/amd64 \

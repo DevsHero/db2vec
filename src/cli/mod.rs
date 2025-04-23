@@ -39,10 +39,6 @@ pub struct Args {
     #[arg(long, env = "DATABASE", default_value = "default_database")]
     pub database: String,
 
-    /// Collection/index name within database
-    #[arg(long, env = "COLLECTION", default_value = "my_collection")]
-    pub collection: String,
-
     /// Tenant name for multi-tenant databases (Chroma)
     #[arg(long, env = "TENANT", default_value = "default_tenant")]
     pub tenant: String,
@@ -55,7 +51,7 @@ pub struct Args {
     #[arg(long, env = "DIMENSION", default_value = "768")]
     pub dimension: usize,
 
-    /// Distance metric for vector similarity (cosine, euclidean, dotproduct)
+    /// Distance metric for vector similarity (l2 , ip ,cosine, euclidean, dotproduct) except for Redis, Surreal, Pinecone
     #[arg(long, env = "METRIC", default_value = "cosine")]
     pub metric: String,
 

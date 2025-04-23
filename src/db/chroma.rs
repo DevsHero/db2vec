@@ -10,6 +10,7 @@ pub struct ChromaDatabase {
     database: String,
     dimension: usize,
     auth_token: Option<String>,
+    metric: String, // Add this field
 }
 
 impl ChromaDatabase {
@@ -24,6 +25,8 @@ impl ChromaDatabase {
         } else {
             None
         };
+        // Get metric from args, defaulting to "cosine" if not specified
+        let metric = args.metric.clone();
 
         Ok(ChromaDatabase {
             client,
@@ -32,6 +35,7 @@ impl ChromaDatabase {
             database,
             dimension,
             auth_token,
+            metric, // Add the metric
         })
     }
 }
@@ -105,7 +109,19 @@ impl Database for ChromaDatabase {
                 let col_body =
                     serde_json::json!({
                     "name": table,
-                    "dimension": self.dimension
+                    "dimension": self.dimension,
+                    "configuration_json": {
+                        "embedding_function": null,
+                        "hnsw": {
+                            "space": self.metric,  // Use the metric from args
+                            "ef_construction": 100,
+                            "ef_search": 100,
+                            "max_neighbors": 16,
+                            "resize_factor": 1.2,
+                            "sync_threshold": 1000
+                        },
+                        "spann": null
+                    }
                 });
                 let mut col_req = self.client.post(&collections_url).json(&col_body);
                 if let Some(ref token) = self.auth_token {
