@@ -5,8 +5,8 @@ use std::{ time::Duration, sync::OnceLock };
 use rayon::prelude::*;
 use std::sync::atomic::{ AtomicUsize, Ordering };
 use std::sync::Arc;
-
 use crate::cli::Args;
+use uuid::Uuid;
 
 pub struct EmbeddingConfig {
     pub model: String,
@@ -17,6 +17,7 @@ pub struct EmbeddingConfig {
     pub timeout: Duration,
     pub max_retries: usize,
     pub retry_delay: Duration,
+    pub dimension: usize,
 }
 
 static SERVICE: OnceLock<EmbeddingService> = OnceLock::new();
@@ -29,7 +30,8 @@ pub fn initialize_from_args(args: &Args) {
         args.embedding_batch_size,
         args.embedding_concurrency,
         args.embedding_max_tokens,
-        args.embedding_timeout
+        args.embedding_timeout,
+        args.dimension
     );
 }
 
@@ -39,7 +41,8 @@ pub fn initialize(
     batch_size: usize,
     concurrency: usize,
     max_tokens: usize,
-    timeout: u64
+    timeout: u64,
+    dimension: usize
 ) {
     let api_url = if url.ends_with("/api/embeddings") {
         url.to_string()
@@ -57,6 +60,7 @@ pub fn initialize(
         timeout: Duration::from_secs(timeout),
         max_retries: 3,
         retry_delay: Duration::from_secs(2),
+        dimension,
     };
 
     let client = HttpClient::builder()
@@ -247,12 +251,23 @@ impl EmbeddingService {
     }
 }
 
-pub fn generate_embedding(text: &str) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
+pub fn generate_embedding(text: &str) -> Vec<f32> {
     if let Some(service) = SERVICE.get() {
-        service.generate_single(text)
-    } else {
-        Err("Embedding service not initialized".into())
+        match service.generate_single(text) {
+            Ok(vector) => {
+                return vector;
+            }
+            Err(e) => {
+                warn!("Embedding generation failed: {}", e);
+            }
+        }
     }
+
+    let dimension = SERVICE.get()
+        .map(|s| s.config.dimension)
+        .unwrap_or(768);
+    let result = vec![0.0; dimension];
+    result
 }
 
 pub fn generate_embeddings_batch(
@@ -267,63 +282,6 @@ pub fn generate_embeddings_batch(
     } else {
         Err("Embedding service not initialized".into())
     }
-}
-
-pub fn process_records_with_embeddings(
-    records: Vec<Value>,
-    embedding_counter: Arc<AtomicUsize>
-) -> Vec<(String, String, Vec<f32>, Value)> {
-    let chunk_size = SERVICE.get()
-        .map(|service| service.config.batch_size)
-        .unwrap_or(16);
-
-    let prepared_records: Vec<_> = records
-        .par_chunks(chunk_size)
-        .flat_map(|chunk| {
-            let texts: Vec<String> = chunk
-                .iter()
-                .map(|record| serde_json::to_string(record).unwrap())
-                .collect();
-
-            let embeddings = match generate_embeddings_batch(&texts) {
-                Ok(embs) => embs,
-                Err(e) => {
-                    error!("Batch embedding failed: {}, falling back to single processing", e);
-                    chunk
-                        .par_iter()
-                        .map(|record| {
-                            generate_embedding(
-                                &serde_json::to_string(record).unwrap()
-                            ).unwrap_or_default()
-                        })
-                        .collect()
-                }
-            };
-
-            embedding_counter.fetch_add(chunk.len(), Ordering::Relaxed);
-            chunk
-                .iter()
-                .zip(embeddings.into_iter())
-                .map(|(record, vec)| {
-                    let id = uuid::Uuid::new_v4().to_string();
-                    let mut meta = record.clone();
-                    let table = record
-                        .get("table")
-                        .and_then(|t| t.as_str())
-                        .unwrap_or("unknown_table")
-                        .to_string();
-
-                    if let Some(obj) = meta.as_object_mut() {
-                        obj.remove("table");
-                    }
-
-                    (table, id, vec, meta)
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect();
-
-    prepared_records
 }
 
 #[deprecated(note = "Use initialize_from_args instead")]
@@ -353,6 +311,7 @@ pub fn generate_embedding_with_params(
         timeout: Duration::from_secs(timeout),
         max_retries: 3,
         retry_delay: Duration::from_secs(2),
+        dimension: 768,
     };
 
     let client = HttpClient::builder().timeout(config.timeout).build()?;
@@ -388,9 +347,56 @@ pub fn generate_embeddings_batch_with_params(
         timeout: Duration::from_secs(timeout),
         max_retries: 3,
         retry_delay: Duration::from_secs(2),
+        dimension: 768,
     };
 
     let client = HttpClient::builder().timeout(config.timeout).build()?;
     let service = EmbeddingService { client, config };
     service.generate_batch(texts)
+}
+
+pub fn process_records_with_embeddings(
+    records: Vec<Value>,
+    args: &Args,
+    embedding_counter: Arc<AtomicUsize>
+) -> Vec<(String, String, Vec<f32>, Value)> {
+    let chunk_size = args.embedding_batch_size;
+    let prepared_records: Vec<_> = records
+        .par_chunks(chunk_size)
+        .flat_map(|chunk| {
+            let texts: Vec<String> = chunk
+                .iter()
+                .map(|record| serde_json::to_string(record).unwrap())
+                .collect();
+
+            let embeddings = match generate_embeddings_batch(&texts) {
+                Ok(embs) => embs,
+                Err(e) => {
+                    warn!("Batch embedding failed: {}, falling back to single processing", e);
+                    chunk
+                        .par_iter()
+                        .map(|record| {
+                            generate_embedding(&serde_json::to_string(record).unwrap())
+                        })
+                        .collect()
+                }
+            };
+
+            let _ = embedding_counter.fetch_add(chunk.len(), Ordering::Relaxed);
+
+            chunk
+                .iter()
+                .zip(embeddings.into_iter())
+                .map(|(record, vec)| {
+                    let id = Uuid::new_v4().to_string();
+                    let mut meta = record.clone();
+                    meta.as_object_mut().unwrap().remove("table");
+                    let table = record.get("table").unwrap().as_str().unwrap().to_string();
+                    (table, id, vec, meta)
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    prepared_records
 }

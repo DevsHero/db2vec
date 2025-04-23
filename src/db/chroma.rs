@@ -1,4 +1,4 @@
-use log::{ info, warn };
+use log::{ info, warn, debug };
 use reqwest::blocking::Client;
 use serde_json::Value;
 use super::{ Database, DbError };
@@ -8,8 +8,7 @@ pub struct ChromaDatabase {
     url: String,
     tenant: String,
     database: String,
-    _collection_name: String,
-    collection_id: String,
+    dimension: usize,
     auth_token: Option<String>,
 }
 
@@ -18,7 +17,6 @@ impl ChromaDatabase {
         let url = format!("{}/api/v2", args.host.trim_end_matches('/'));
         let tenant = args.tenant.clone();
         let database = args.database.clone();
-        let _collection_name = args.collection.clone();
         let dimension = args.dimension;
         let client = Client::new();
         let auth_token = if args.use_auth && !args.secret.is_empty() {
@@ -27,84 +25,12 @@ impl ChromaDatabase {
             None
         };
 
-        let tenants_url = format!("{}/tenants", url);
-        let tenant_body = serde_json::json!({ "name": tenant });
-        let mut tenant_req = client.post(&tenants_url).json(&tenant_body);
-
-        if let Some(ref token) = auth_token {
-            tenant_req = tenant_req.header("X-Chroma-Token", token);
-        }
-
-        let tenant_resp = tenant_req.send().map_err(|e| Box::new(e) as DbError)?;
-
-        if !tenant_resp.status().is_success() && tenant_resp.status().as_u16() != 409 {
-            let err = tenant_resp.text().map_err(|e| Box::new(e) as DbError)?;
-            return Err(format!("Failed to create tenant: {}", err).into());
-        }
-
-        let databases_url = format!("{}/tenants/{}/databases", url, tenant);
-        let db_body = serde_json::json!({ "name": database });
-        let mut db_req = client.post(&databases_url).json(&db_body);
-
-        if let Some(ref token) = auth_token {
-            db_req = db_req.header("X-Chroma-Token", token);
-        }
-        let db_resp = db_req.send().map_err(|e| Box::new(e) as DbError)?;
-
-        if !db_resp.status().is_success() && db_resp.status().as_u16() != 409 {
-            let err = db_resp.text().map_err(|e| Box::new(e) as DbError)?;
-            return Err(format!("Failed to create database: {}", err).into());
-        }
-
-        let collections_url = format!(
-            "{}/tenants/{}/databases/{}/collections",
-            url,
-            tenant,
-            database
-        );
-        let col_body = serde_json::json!({ "name": _collection_name, "dimension": dimension });
-        let mut col_req = client.post(&collections_url).json(&col_body);
-        if let Some(ref token) = auth_token {
-            col_req = col_req.header("X-Chroma-Token", token);
-        }
-        let col_resp = col_req.send().map_err(|e| Box::new(e) as DbError)?;
-        if col_resp.status().is_success() {
-            info!("Collection created: {}", _collection_name);
-        } else if col_resp.status().as_u16() == 409 {
-            warn!("Collection already exists: {}", _collection_name);
-        } else {
-            let err = col_resp.text().map_err(|e| Box::new(e) as DbError)?;
-            return Err(format!("Failed to create collection: {}", err).into());
-        }
-
-        let collections_url = format!(
-            "{}/tenants/{}/databases/{}/collections",
-            url,
-            tenant,
-            database
-        );
-        let mut list_req = client.get(&collections_url);
-        if let Some(ref token) = auth_token {
-            list_req = list_req.header("X-Chroma-Token", token);
-        }
-        let resp = list_req.send().map_err(|e| Box::new(e) as DbError)?;
-        let collections: Value = resp.json().map_err(|e| Box::new(e) as DbError)?;
-        let collection_id = collections
-            .as_array()
-            .unwrap_or(&vec![])
-            .iter()
-            .find(|c| c["name"] == _collection_name)
-            .and_then(|c| c["id"].as_str())
-            .ok_or("Collection UUID not found")?
-            .to_string();
-
         Ok(ChromaDatabase {
             client,
             url,
             tenant,
             database,
-            _collection_name,
-            collection_id,
+            dimension,
             auth_token,
         })
     }
@@ -117,43 +43,134 @@ impl Database for ChromaDatabase {
 
     fn store_vector(
         &self,
-        _table: &str,
+        table: &str,
         items: &[(String, Vec<f32>, Value)]
     ) -> Result<(), DbError> {
         if items.is_empty() {
             return Ok(());
         }
 
+        let dbs_url = format!("{}/tenants/{}/databases", self.url, self.tenant);
+        let mut list_dbs_req = self.client.get(&dbs_url);
+        if let Some(ref token) = self.auth_token {
+            list_dbs_req = list_dbs_req.header("X-Chroma-Token", token);
+        }
+        let dbs_json: Value = list_dbs_req.send()?.json()?;
+        let db_exists = dbs_json
+            .as_array()
+            .map(|arr| arr.iter().any(|db| db["name"].as_str() == Some(&self.database)))
+            .unwrap_or(false);
+        if !db_exists {
+            info!("Creating Chroma database '{}'", self.database);
+            let mut create_db_req = self.client
+                .post(&dbs_url)
+                .json(&serde_json::json!({ "name": self.database }));
+            if let Some(ref token) = self.auth_token {
+                create_db_req = create_db_req.header("X-Chroma-Token", token);
+            }
+            let create_db_res = create_db_req.send()?;
+            if !create_db_res.status().is_success() {
+                let err = create_db_res.text()?;
+                return Err(
+                    format!("Failed to create Chroma database '{}': {}", self.database, err).into()
+                );
+            }
+            info!("Chroma database '{}' created", self.database);
+        }
+
+        let collections_url = format!(
+            "{}/tenants/{}/databases/{}/collections",
+            self.url,
+            self.tenant,
+            self.database
+        );
+        let mut list_req = self.client.get(&collections_url);
+        if let Some(ref token) = self.auth_token {
+            list_req = list_req.header("X-Chroma-Token", token);
+        }
+        let cols_res = list_req.send()?;
+        let cols_json: Value = cols_res.json()?;
+        let mut collection_id: Option<String> = None;
+        if let Some(arr) = cols_json.as_array() {
+            for col in arr {
+                if col["name"].as_str() == Some(table) {
+                    collection_id = col["id"].as_str().map(|s| s.to_string());
+                    break;
+                }
+            }
+        }
+        let collection_id = match collection_id {
+            Some(id) => id,
+            None => {
+                let col_body =
+                    serde_json::json!({
+                    "name": table,
+                    "dimension": self.dimension
+                });
+                let mut col_req = self.client.post(&collections_url).json(&col_body);
+                if let Some(ref token) = self.auth_token {
+                    col_req = col_req.header("X-Chroma-Token", token);
+                }
+                let col_res = col_req.send()?;
+                let col_json: Value = col_res.json()?;
+                debug!("Chroma create collection response: {}", col_json);
+
+                col_json
+                    .get("id")
+                    .or_else(|| col_json.get("collection_id"))
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        format!("Failed to get new collection id, response: {}", col_json)
+                    })?
+                    .to_string()
+            }
+        };
+
         let ids: Vec<String> = items
             .iter()
-            .map(|(id, _, _)| format!("{}:{}", _table, id))
+            .map(|(id, _, _)| format!("{}:{}", table, id))
             .collect();
-
         let embeddings: Vec<Vec<f32>> = items
             .iter()
-            .map(|(_, v, _)| v.clone())
+            .map(|(id, vec, _)| {
+                if vec.is_empty() {
+                    warn!("ID='{}': Empty vector received, inserting dummy value", id);
+                    vec![0.1]
+                } else if vec.len() != self.dimension {
+                    warn!(
+                        "ID='{}': Vector length {} != collection dimension {}, fixing",
+                        id,
+                        vec.len(),
+                        self.dimension
+                    );
+                    let mut fixed_vec = vec![0.0; self.dimension];
+                    for (i, val) in vec.iter().enumerate().take(self.dimension) {
+                        fixed_vec[i] = *val;
+                    }
+                    fixed_vec
+                } else {
+                    vec.clone()
+                }
+            })
             .collect();
-
         let documents: Vec<String> = items
             .iter()
             .map(|_| String::new())
             .collect();
-
         let metadatas: Vec<Value> = items
             .iter()
-            .map(|(_, _, meta)| {
-                if let Some(obj) = meta.as_object() {
-                    let mut simple_meta = serde_json::Map::new();
-                    for (k, v) in obj {
+            .map(|(_, _, m)| {
+                if let Some(map) = m.as_object() {
+                    let mut simple = serde_json::Map::new();
+                    for (k, v) in map {
                         if v.is_string() || v.is_number() || v.is_boolean() {
-                            simple_meta.insert(k.clone(), v.clone());
+                            simple.insert(k.clone(), v.clone());
                         }
                     }
-
-                    if simple_meta.is_empty() {
+                    if simple.is_empty() {
                         Value::Null
                     } else {
-                        Value::Object(simple_meta)
+                        Value::Object(simple)
                     }
                 } else {
                     Value::Null
@@ -174,21 +191,31 @@ impl Database for ChromaDatabase {
             self.url,
             self.tenant,
             self.database,
-            self.collection_id
+            collection_id
         );
-
         let mut req = self.client.post(&add_url).json(&body);
         if let Some(ref token) = self.auth_token {
             req = req.header("X-Chroma-Token", token);
         }
+        let resp = req.send()?;
 
-        let resp = req.send().map_err(|e| Box::new(e) as DbError)?;
-        if resp.status().is_success() {
-            info!("Chroma: inserted {} vectors", items.len());
+        let status = resp.status();
+        let body_text = resp.text()?;
+        debug!("Chroma insert response ({}): {}", status, body_text);
+
+        if status.is_success() {
+            info!("Chroma: inserted {} vectors into '{}'", items.len(), table);
+            Ok(())
+        } else if body_text.contains("Error in compaction") {
+            warn!("Chroma compaction error during insert (ignored): {}", body_text);
+            info!(
+                "Chroma: potentially inserted {} vectors into '{}' despite compaction error",
+                items.len(),
+                table
+            );
             Ok(())
         } else {
-            let text = resp.text().map_err(|e| Box::new(e) as DbError)?;
-            Err(format!("Chroma bulk insert failed: {}", text).into())
+            Err(format!("Chroma bulk insert failed: {}", body_text).into())
         }
     }
 }

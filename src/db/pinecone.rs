@@ -6,7 +6,7 @@ pub struct Args {
     pub host: String,
     pub index: String,
     pub dimension: usize,
-    pub metric: Option<String>, // "cosine", "euclidean", or "dotproduct"
+    pub metric: Option<String>,
     pub api_key: Option<String>,
     pub use_auth: bool,
     pub namespace: String,
@@ -145,10 +145,17 @@ impl Database for PineconeDatabase {
         let vectors: Vec<Value> = items
             .iter()
             .map(|(id, vector, data)| {
+                let vec_values = if vector.is_empty() {
+                    warn!("ID='{}': Empty vector received, filling with zeros", id);
+                    vec![0.0f32; 768]
+                } else {
+                    vector.clone()
+                };
+
                 let mut record =
                     json!({
                     "id": format!("{}:{}", table, id),
-                    "values": vector
+                    "values": vec_values 
                 });
 
                 let mut processed_metadata = json!({});

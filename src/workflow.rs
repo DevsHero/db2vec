@@ -1,6 +1,6 @@
 use crate::cli::Args;
 use crate::db::{ Database, DbError, store_in_batches };
-use crate::embedding::process_records_with_embeddings;
+use crate::embedding::embeding::process_records_with_embeddings;
 use crate::util::spinner::start_spinner_animation;
 use log::info;
 use serde_json::Value;

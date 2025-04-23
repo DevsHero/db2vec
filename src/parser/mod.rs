@@ -21,19 +21,14 @@ pub fn parse_database_export(
     args: &Args
 ) -> Result<Vec<Value>, Box<dyn std::error::Error>> {
     let mut all_records = Vec::new();
-
-    // Determine chunks based on format. Some formats need the whole content.
     let chunks: Vec<String> = match format {
-        // These formats require the full context for reliable parsing
         "mssql" | "postgres" | "mysql" | "surreal" | "sqlite" => {
-            // <--- Added "sqlite" here
             info!("Processing {} file without chunking", format);
             vec![content.to_string()]
         }
-        // Oracle can often be chunked by Insert statements (Keep this for now, might need review later)
         "oracle" => {
             content
-                .split("Insert into") // Basic split, might need refinement for complex cases
+                .split("Insert into")
                 .filter(|s| !s.trim().is_empty())
                 .enumerate()
                 .map(|(i, s)| {
@@ -41,7 +36,6 @@ pub fn parse_database_export(
                 })
                 .collect()
         }
-        // Fallback for unknown or simple formats (e.g., JSON lines)
         _ => {
             warn!("Using default (single chunk) processing for unknown format: {}", format);
             vec![content.to_string()]
@@ -51,7 +45,6 @@ pub fn parse_database_export(
     info!("Found {} chunks to process for format '{}'", chunks.len(), format);
 
     for (i, chunk) in chunks.iter().enumerate() {
-        // Skip empty chunks that might result from splitting
         if chunk.trim().is_empty() {
             debug!("Skipping empty chunk {}", i);
             continue;
@@ -68,14 +61,12 @@ pub fn parse_database_export(
                     }
                     all_records.extend(records);
                 } else {
-                    // This can happen if a chunk contains only comments or non-data SQL
                     debug!("Regex parsing yielded 0 records for chunk {}", i);
                 }
             }
             None => {
                 warn!("Regex parsing failed entirely for chunk {}", i);
                 if args.debug && chunk.len() < 1000 {
-                    // Avoid logging huge chunks
                     debug!("Content of failed chunk {}:\n{}", i, chunk);
                 } else if args.debug {
                     debug!(
