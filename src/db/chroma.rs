@@ -10,7 +10,7 @@ pub struct ChromaDatabase {
     database: String,
     dimension: usize,
     auth_token: Option<String>,
-    metric: String, // Add this field
+    metric: String, // l2 , cosine, IP
 }
 
 impl ChromaDatabase {
@@ -25,9 +25,8 @@ impl ChromaDatabase {
         } else {
             None
         };
-        // Get metric from args, defaulting to "cosine" if not specified
-        let metric = args.metric.clone();
 
+        let metric = args.metric.clone();
         Ok(ChromaDatabase {
             client,
             url,
@@ -35,7 +34,7 @@ impl ChromaDatabase {
             database,
             dimension,
             auth_token,
-            metric, // Add the metric
+            metric,
         })
     }
 }
@@ -113,7 +112,7 @@ impl Database for ChromaDatabase {
                     "configuration_json": {
                         "embedding_function": null,
                         "hnsw": {
-                            "space": self.metric,  // Use the metric from args
+                            "space": self.metric,  
                             "ef_construction": 100,
                             "ef_search": 100,
                             "max_neighbors": 16,

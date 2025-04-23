@@ -98,8 +98,8 @@ pub struct Args {
 
     /// Enable Redis grouping of records by table name.
     /// If true, records will be grouped by table name ("table:profile" -> [records]).
-    /// If false, records will be stored as unique entries with a table label inserted
-    /// into the JSON (46ef6eb2-a222-486f-a869-6c220a898758 -> {label: "table:profile"}).
+    /// If false, use redis best practice FT.CREATE & FT.SEARCH
+    /// into this pattern (item:table:46ef6eb2-a222-486f-a869-6c220a898758) .
     #[arg(long, default_value = "false")]
     pub group_redis: bool,
 }
