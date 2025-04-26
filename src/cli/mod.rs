@@ -4,31 +4,31 @@ use clap::Parser;
 #[command(author, version, about, long_about = None)]
 pub struct Args {
     /// Path to the .sql/.surql database dump file to process
-    #[arg(short = 'f', long, default_value = "./surreal.surql")]
+    #[arg(short = 'f', env = "FILE_PATH", long, default_value = "./surreal.surql")]
     pub data_file: String,
 
     /// Vector database type (Redis, Chroma, Milvus, Qdrant, Surreal, Pinecone)
-    #[arg(short = 't', long, default_value = "redis")]
+    #[arg(short = 't', env = "TYPE", long, default_value = "redis")]
     pub db_export_type: String,
 
     /// Username for database authentication (Milvus, SurrealDB)
-    #[arg(short = 'u', long, default_value = "root")]
+    #[arg(short = 'u', env = "USER", long, default_value = "root")]
     pub user: String,
 
     /// Password for database authentication (Milvus, SurrealDB, Redis)
-    #[arg(short = 'p', long, default_value = "")]
+    #[arg(short = 'p', env = "PASS", long, default_value = "")]
     pub pass: String,
 
     /// API key/token for database authentication (Chroma, Qdrant, Pinecone)
-    #[arg(short = 'k', long, default_value = "")]
+    #[arg(short = 'k', env = "SECRET", long, default_value = "")]
     pub secret: String,
 
     /// Enable authentication for the vector database
-    #[arg(long, default_value = "false")]
+    #[arg(long, env = "AUTH", default_value = "false")]
     pub use_auth: bool,
 
     /// Enable debug mode to print parsed records
-    #[arg(long, default_value = "false")]
+    #[arg(long, env = "DEBUG", default_value = "false")]
     pub debug: bool,
 
     /// Vector database URL/host endpoint
@@ -58,6 +58,7 @@ pub struct Args {
     /// Maximum payload size in MB for vector database requests
     #[arg(
         short = 'm',
+        env = "PAYLOAD_SIZE_MB",
         long,
         default_value = "12",
         help = "Maximum payload size in MB for database requests"
@@ -65,7 +66,7 @@ pub struct Args {
     pub max_payload_size_mb: usize,
 
     /// Number of chunks to process in parallel for storage
-    #[arg(short = 'c', long, default_value = "10")]
+    #[arg(short = 'c', env = "CHUNK_SIZE", long, default_value = "10")]
     pub chunk_size: usize, // Fixed typo: chuck_size -> chunk_size
 
     /// Embedding model to use with Ollama
@@ -100,6 +101,6 @@ pub struct Args {
     /// If true, records will be grouped by table name ("table:profile" -> [records]).
     /// If false, use redis best practice FT.CREATE & FT.SEARCH
     /// into this pattern (item:table:46ef6eb2-a222-486f-a869-6c220a898758) .
-    #[arg(long, default_value = "false")]
+    #[arg(long, env = "GROUP_REDIS", default_value = "false")]
     pub group_redis: bool,
 }

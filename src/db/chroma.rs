@@ -10,7 +10,7 @@ pub struct ChromaDatabase {
     database: String,
     dimension: usize,
     auth_token: Option<String>,
-    metric: String, // l2 , cosine, IP
+    metric: String,
 }
 
 impl ChromaDatabase {

@@ -54,19 +54,44 @@ Tired of waiting hours for Python scripts to embed large database exports? So wa
 Use CLI flags or `.env` (CLI always wins).  
 
 ```env
+# File and database type options
+FILE_PATH="./surreal.surql"
+TYPE="redis"
+
+# Authentication
+USER="root"
+PASS=""
+SECRET=""
+AUTH="false"
+
+# Connection details
+HOST="redis://127.0.0.1:6379"
+DATABASE="default_database"
+TENANT="default_tenant"
+NAMESPACE="default_namespace"
+
+# Vector settings
+DIMENSION=768
+METRIC="cosine"
+
+# Batch processing options
+PAYLOAD_SIZE_MB=12
+CHUNK_SIZE=10
+
+# Embedding configuration
 EMBEDDING_URL="http://localhost:11434"
 EMBEDDING_MODEL="nomic-embed-text"
 EMBEDDING_MAX_CONCURRENCY=4
 EMBEDDING_BATCH_SIZE=16
 EMBEDDING_MAX_TOKENS=8000
-EMBEDDING_TIMEOUT=60
-NUM_THREADS=0  
-HOST="redis://127.0.0.1:6379"
-DATABASE="default_database"
-DIMENSION=768
-TENANT="default_tenant"
-NAMESPACE="default_namespace"
-METRIC="cosine"
+OLLAMA_TIMEOUT=60
+
+# Performance settings
+NUM_THREADS=0
+
+# Special behaviors
+DEBUG="false"
+GROUP_REDIS="false"
 ```
 
 ---

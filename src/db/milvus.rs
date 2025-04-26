@@ -9,7 +9,7 @@ pub struct MilvusDatabase {
     client: Client,
     dimension: usize,
     db_name: String,
-    metric: String, // l2 , cosine, IP
+    metric: String,
 }
 
 impl MilvusDatabase {

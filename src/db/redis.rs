@@ -1,5 +1,5 @@
-use redis::{ Client, Commands, ConnectionLike };
-use serde_json::{ json, Value };
+use redis::Client;
+use serde_json::Value;
 use log::{ info, warn, debug };
 use std::io::{ Error as IoError, ErrorKind };
 use super::{ Database, DbError };
@@ -129,7 +129,7 @@ impl RedisDatabase {
                 info!("Redis index '{}' already exists.", index_name);
                 Ok(())
             }
-            Err(e) => {
+            Err(_e) => {
                 info!("Creating Redis index '{}' with dimension {}", index_name, self.dimension);
                 let mut ft_create_cmd = redis::cmd("FT.CREATE");
                 ft_create_cmd
