@@ -1,5 +1,5 @@
 use base64::{ engine::general_purpose::STANDARD, Engine as _ };
-use log::{ info, error };
+use log::{ info, error, warn };
 use reqwest::blocking::Client;
 use serde_json::Value;
 use super::{ Database, DbError };
@@ -70,6 +70,38 @@ impl SurrealDatabase {
 
         Ok(SurrealDatabase { url: base_url, ns, db, auth_header, client })
     }
+
+    fn ensure_table_exists(&self, table: &str) -> Result<(), DbError> {
+        let sql_url = format!("{}/sql", self.url.trim_end_matches('/'));
+        let define_table_sql =
+            format!("DEFINE TABLE IF NOT EXISTS `{}` TYPE ANY SCHEMALESS PERMISSIONS NONE;", table);
+
+        info!("Ensuring table exists: {}", define_table_sql);
+
+        let mut req = self.client
+            .post(&sql_url)
+            .header("Content-Type", "text/plain")
+            .header("Accept", "application/json")
+            .header("Surreal-NS", &self.ns)
+            .header("Surreal-DB", &self.db)
+            .body(define_table_sql);
+
+        if let Some(ref auth) = self.auth_header {
+            req = req.header("Authorization", auth);
+        }
+
+        let resp = req.send().map_err(|e| Box::new(e) as DbError)?;
+        let status = resp.status();
+        let text = resp.text().map_err(|e| Box::new(e) as DbError)?;
+
+        info!("SurrealDB DEFINE TABLE response ({}): {}", status, text);
+
+        if !status.is_success() {
+            warn!("Potential issue defining table '{}' (Status: {}): {}", table, status, text);
+        }
+
+        Ok(())
+    }
 }
 
 impl Database for SurrealDatabase {
@@ -85,6 +117,9 @@ impl Database for SurrealDatabase {
         if items.is_empty() {
             return Ok(());
         }
+
+        self.ensure_table_exists(table)?;
+
         let records: Vec<(String, Value)> = items
             .iter()
             .map(|(id, vector, meta)| {

@@ -29,6 +29,7 @@ Official docs: https://surrealdb.com/docs/surrealdb/installation/running/docker
 
 ```bash
 docker run -d --rm --pull always \
+  --name surreal \
   -p 8000:8000 \
   -v /mydata:/mydata \
   surrealdb/surrealdb:latest \
