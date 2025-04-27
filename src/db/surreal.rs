@@ -134,22 +134,27 @@ impl Database for SurrealDatabase {
             })
             .collect();
 
-        let import_url = format!("{}/import", self.url.trim_end_matches("/sql"));
+        let import_url = format!("{}/import", self.url.trim_end_matches('/'));
         let mut import_data = String::new();
 
         for (id, data) in &records {
-            let mut record = data.clone();
-            if let Some(obj) = record.as_object_mut() {
-                obj.insert("id".to_string(), format!("{}:{}", table, id).into());
-            }
-            import_data.push_str(&format!("{}\n", serde_json::to_string(&record)?));
+            let record_id = format!("{}:`{}`", table, id);
+            let content_json = serde_json::to_string(&data)?;
+            import_data.push_str(&format!("CREATE {} CONTENT {};\n", record_id, content_json));
         }
+
+        info!("SurrealDB Import URL: {}", import_url);
+        let preview_len = import_data.chars().count().min(300);
+        info!(
+            "SurrealDB Import Payload Preview: {}...",
+            import_data.chars().take(preview_len).collect::<String>()
+        );
 
         let mut req = self.client
             .post(&import_url)
             .header("Surreal-NS", &self.ns)
             .header("Surreal-DB", &self.db)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/plain")
             .header("Accept", "application/json")
             .body(import_data);
 
@@ -159,11 +164,12 @@ impl Database for SurrealDatabase {
 
         let resp = req.send()?;
         let status = resp.status();
+        let text = resp.text().unwrap_or_else(|e| format!("Failed to read response body: {}", e));
+        info!("SurrealDB Import Response Status: {}", status);
+        info!("SurrealDB Import Response Body: {}", text);
 
         if !status.is_success() {
-            let text = resp.text()?;
-            error!("SurrealDB batch import failed ({}): {}", status, text);
-            return Err(format!("SurrealDB batch import failed: {}", text).into());
+            return Err(format!("SurrealDB batch import failed ({}): {}", status, text).into());
         }
 
         info!("SurrealDB: successfully imported {} records to {}", records.len(), table);
