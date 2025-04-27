@@ -39,11 +39,23 @@ pub struct Args {
     #[arg(long, env = "DATABASE", default_value = "default_database")]
     pub database: String,
 
+    /// For Pinecone, the name of the index to use
+    #[arg(long, env = "INDEXES", default_value = "default_indexes")]
+    pub indexes: String,
+
+    /// Cloud provider for Pinecone (aws, azure, gcp)
+    #[arg(long, env = "CLOUD", default_value = "aws")]
+    pub cloud: String,
+
+    /// Cloud region for Pinecone (us-east-1, us-west-1, etc.)
+    #[arg(long, env = "REGION", default_value = "us-east-1")]
+    pub region: String,
+
     /// Tenant name for multi-tenant databases (Chroma)
     #[arg(long, env = "TENANT", default_value = "default_tenant")]
     pub tenant: String,
 
-    /// Namespace for databases that support it (SurrealDB, Pinecone)
+    /// Namespace for databases that support it (SurrealDB )
     #[arg(long, env = "NAMESPACE", default_value = "default_namespace")]
     pub namespace: String,
 

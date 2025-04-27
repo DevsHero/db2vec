@@ -10,7 +10,6 @@ pub struct PineconeDatabase {
     api_version: String,
     api_key: Option<String>,
     use_auth: bool,
-    namespace: String,
     dimension: usize,
 }
 
@@ -29,21 +28,117 @@ impl PineconeDatabase {
             "https://api.pinecone.io".to_string()
         };
 
-        let data_plane_url = args.host.clone();
+        let mut parsed_host_from_create: Option<String> = None;
 
-        if !is_local && args.secret.is_empty() {
-            return Err(
-                "Pinecone cloud requires an API key. Use -k/--secret to provide one.".into()
+        if !args.indexes.is_empty() && !is_local {
+            let index_name = args.indexes.as_str();
+            let endpoint = "indexes";
+            let url = format!("{}/{}", control_plane_url, endpoint);
+
+            let spec = json!({ "serverless": { "cloud": args.cloud, "region": args.region } });
+            let body =
+                json!({ "name": index_name, "dimension": args.dimension, "metric": args.metric, "spec": spec });
+
+            let mut req = client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .header("X-Pinecone-API-Version", &api_version)
+                .json(&body);
+
+            if args.secret.is_empty() {
+                return Err("Pinecone cloud requires an API key (-k/--secret).".into());
+            }
+            req = req.header("Api-Key", &args.secret);
+
+            let resp = req.send()?;
+            match resp.status().as_u16() {
+                201 | 200 => {
+                    let j: Value = resp.json()?;
+                    let host = j
+                        .get("host")
+                        .and_then(|h| h.as_str())
+                        .ok_or_else(|| DbError::from("Missing host in create index response"))?;
+                    info!("Index '{}' available at host: {}", index_name, host);
+                    parsed_host_from_create = Some(format!("https://{}", host));
+                }
+                409 => {
+                    warn!("Index '{}' already exists, attempting to describe it to get host.", index_name);
+                    let describe_url = format!("{}/{}", url, index_name);
+                    let describe_req = client
+                        .get(&describe_url)
+                        .header("Accept", "application/json")
+                        .header("X-Pinecone-API-Version", &api_version)
+                        .header("Api-Key", &args.secret);
+
+                    let describe_resp = describe_req.send()?;
+                    if describe_resp.status().is_success() {
+                        let j: Value = describe_resp.json()?;
+                        let host = j
+                            .get("host")
+                            .and_then(|h| h.as_str())
+                            .ok_or_else(||
+                                DbError::from("Missing host in describe index response")
+                            )?;
+                        info!("Existing index '{}' found at host: {}", index_name, host);
+                        parsed_host_from_create = Some(format!("https://{}", host));
+                    } else {
+                        let txt = describe_resp.text().unwrap_or_default();
+                        return Err(
+                            format!(
+                                "Failed to describe existing index '{}': {}",
+                                index_name,
+                                txt
+                            ).into()
+                        );
+                    }
+                }
+                status => {
+                    let txt = resp.text().unwrap_or_default();
+                    return Err(
+                        format!("Failed to create/ensure index ({}): {}", status, txt).into()
+                    );
+                }
+            }
+        } else if !args.indexes.is_empty() && is_local {
+            warn!(
+                "Running locally. Assuming database '{}' exists. Skipping creation/check.",
+                args.indexes
             );
+        }
+
+        let data_plane_url = if is_local {
+            args.host.clone()
+        } else {
+            if args.host.contains(".svc.") && args.host.contains(".pinecone.io") {
+                info!("Using provided --host as data plane URL: {}", args.host);
+                if args.host.starts_with("https://") {
+                    args.host.clone()
+                } else {
+                    format!("https://{}", args.host)
+                }
+            } else if let Some(host) = parsed_host_from_create {
+                info!("Using host from create/describe API response as data plane URL: {}", host);
+                host
+            } else {
+                return Err(
+                    "Could not determine Pinecone data plane URL. Provide it via --host or ensure --indexes is set correctly.".into()
+                );
+            }
+        };
+        if !is_local && args.secret.is_empty() {
+            return Err("Pinecone cloud requires an API key (-k/--secret).".into());
         }
 
         let pd = PineconeDatabase {
             control_plane_url,
             data_plane_url,
-            namespace: args.namespace.clone(),
             client,
             api_version,
-            api_key: Some(args.secret.clone()),
+            api_key: if args.secret.is_empty() {
+                None
+            } else {
+                Some(args.secret.clone())
+            },
             use_auth: !is_local,
             dimension: args.dimension,
         };
@@ -55,7 +150,6 @@ impl PineconeDatabase {
         Ok(pd)
     }
 }
-
 impl Database for PineconeDatabase {
     fn connect(_url: &str) -> Result<Self, DbError> where Self: Sized {
         unimplemented!("Use PineconeDatabase::new(&args) instead");
@@ -95,27 +189,29 @@ impl Database for PineconeDatabase {
 
                 let mut record =
                     json!({
-                    "id": format!("{}:{}", table, id),
+                    "id": id, 
                     "values": values
                 });
 
-                let mut processed_metadata = json!({});
+                let mut processed_metadata = serde_json::Map::new();
+                processed_metadata.insert("table".to_string(), Value::String(table.to_string()));
+
                 if let Some(map) = data.as_object() {
                     for (k, v) in map {
                         if v.is_null() {
                             continue;
                         }
-
                         if v.is_object() || v.is_array() {
-                            processed_metadata[k] = Value::String(
-                                serde_json::to_string(v).unwrap_or_default()
+                            processed_metadata.insert(
+                                k.clone(),
+                                Value::String(serde_json::to_string(v).unwrap_or_default())
                             );
                         } else {
-                            processed_metadata[k] = v.clone();
+                            processed_metadata.insert(k.clone(), v.clone());
                         }
                     }
                 }
-                record["metadata"] = processed_metadata;
+                record["metadata"] = Value::Object(processed_metadata);
                 record
             })
             .collect();
@@ -123,7 +219,7 @@ impl Database for PineconeDatabase {
         let payload =
             json!({
             "vectors": vectors,
-            "namespace": self.namespace
+            "namespace": table 
         });
 
         let mut req = self.client
@@ -133,7 +229,12 @@ impl Database for PineconeDatabase {
             .header("X-Pinecone-API-Version", &self.api_version);
 
         if self.use_auth {
-            req = req.header("Api-Key", self.api_key.as_ref().unwrap());
+            if let Some(key) = self.api_key.as_ref() {
+                req = req.header("Api-Key", key);
+            } else {
+                error!("Pinecone auth enabled but no API key available.");
+                return Err("Pinecone auth enabled but no API key available.".into());
+            }
         }
 
         let resp = req.json(&payload).send()?;
@@ -143,13 +244,13 @@ impl Database for PineconeDatabase {
                 .get("upsertedCount")
                 .and_then(|c| c.as_u64())
                 .unwrap_or(0);
-            info!("Pinecone: upserted {} vectors into `{}`", count, self.namespace);
+            info!("Pinecone: upserted {} vectors into namespace `{}`", count, table);
             Ok(())
         } else {
             let status = resp.status();
             let txt = resp.text()?;
-            error!("Pinecone bulk upsert failed ({}): {}", status, txt);
-            Err(format!("Pinecone bulk upsert error: {}", txt).into())
+            error!("Pinecone bulk upsert failed for namespace '{}' ({}): {}", table, status, txt);
+            Err(format!("Pinecone bulk upsert error for namespace '{}': {}", table, txt).into())
         }
     }
 }

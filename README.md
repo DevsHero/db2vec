@@ -10,48 +10,50 @@ Tired of waiting hours for Python scripts to embed large database exports? So wa
 
 ## Core Features
 
-* 🚀 **Blazing Fast:** Built in Rust for maximum throughput on large datasets.
-* 🔄 **Parallel Processing:** Adjustable concurrency and batch‑size for embedding generation (`--num‑threads`, `--embedding‑concurrency`, `--embedding‑batch‑size`).
-* 📦 **Batch Inserts:** Configurable batch size (`-b, --batch-size-mb`) for efficient bulk loading into the target vector database.
-* 🔧 **Highly Configurable:** Fine-tune performance and behavior with extensive CLI arguments for embedding, database connections, batching, and more.
-* 📄 **Supported Dump Formats:**
-  - `.sql` (MySQL, PostgreSQL, MSSQL, SQLite, Oracle)
-    - **MSSQL:**
-      ```bash
-      sqlcmd -S server -U user -P pass -Q "SET NOCOUNT ON; SELECT * FROM dbo.TableName;" -o dump.sql
-      ```
-    - *Oracle requires exporting via SQL Developer or similar into standard SQL.*
-  - `.surql` (SurrealDB)
-* 🧠 **Local Embeddings:** Uses Ollama (`--embedding-model`) to generate vectors.
-* 💾 **Vector DB Targets:** Inserts vectors + metadata into:
-  - Chroma
-  - Milvus
-  - Pinecone
-  - Qdrant
-  - Redis Stack
-  - SurrealDB
-* ⚙️ **Pure Regex Parsing:** Fast, reliable record extraction (no AI).
-* 🔒 **Authentication:** Supports user/password, API key, tenants/namespaces per DB.
-* 🐞 **Debug Mode:** `--debug` prints parsed JSON records before embedding.
+*   🚀 **Blazing Fast:** Built in Rust for maximum throughput on large datasets.
+*   🔄 **Parallel Processing:** Adjustable concurrency and batch‑size for embedding generation (`--num‑threads`, `--embedding‑concurrency`, `--embedding‑batch-size`).
+*   📦 **Batch Inserts:** Configurable batch size (`-c, --chunk-size`) and payload limits (`-m, --max-payload-size-mb`) for efficient bulk loading into the target vector database.
+*   🔧 **Highly Configurable:** Fine-tune performance and behavior with extensive CLI arguments for embedding, database connections, batching, and more.
+*   📄 **Supported Dump Formats:**
+    *   `.sql` (MySQL, PostgreSQL, MSSQL, SQLite, Oracle)
+        *   **MSSQL:**
+            ```bash
+            sqlcmd -S server -U user -P pass -Q "SET NOCOUNT ON; SELECT * FROM dbo.TableName;" -o dump.sql
+            ```
+        *   *Oracle requires exporting via SQL Developer or similar into standard SQL.*
+    *   `.surql` (SurrealDB)
+*   🧠 **Local Embeddings:** Uses Ollama (`--embedding-model`) to generate vectors.
+*   💾 **Vector DB Targets:** Inserts vectors + metadata into:
+    *   Chroma
+    *   Milvus
+    *   Pinecone (Cloud & Local Dev Image)
+    *   Qdrant
+    *   Redis Stack
+    *   SurrealDB
+*   ⚙️ **Pure Regex Parsing:** Fast, reliable record extraction (no AI).
+*   🔒 **Authentication:** Supports user/password, API key, tenants/namespaces per DB.
+*   ☁️ **Pinecone Cloud Support:** Automatically creates/describes indexes, uses namespaces.
+*   🐞 **Debug Mode:** `--debug` prints parsed JSON records before embedding.
 
 ---
 
 ## Requirements
 
-* **Rust:** Latest stable (Edition 2021+).  
-* **Ollama:** Running locally with your model(s):  
-  ```bash
-  ollama pull nomic-embed-text        # 768‑dim
-  ollama pull nomic-embed-text-384-v2 # 384‑dim
-  ```  
-* **Target DB:** One of Chroma, Milvus, Pinecone, Qdrant, Redis Stack, SurrealDB (Docker recommended).  
-* **(Optional) `.env`:** For embedding URL/model and other defaults.
+*   **Rust:** Latest stable (Edition 2021+).
+*   **Ollama:** Running locally with your model(s):
+    ```bash
+    ollama pull nomic-embed-text        # 768‑dim (default)
+    # ollama pull mxbai-embed-large     # 1024-dim
+    # ollama pull all-minilm            # 384-dim
+    ```
+*   **Target DB:** One of Chroma, Milvus, Pinecone, Qdrant, Redis Stack, SurrealDB (Docker recommended for local).
+*   **(Optional) `.env`:** For embedding URL/model and other defaults.
 
 ---
 
 ## Configuration
 
-Use CLI flags or `.env` (CLI always wins).  
+Use CLI flags or `.env` (CLI always wins).
 
 ```env
 # File and database type options
@@ -61,22 +63,25 @@ TYPE="redis"
 # Authentication
 USER="root"
 PASS=""
-SECRET=""
+SECRET="" # API Key for Chroma, Qdrant, Pinecone
 AUTH="false"
 
 # Connection details
-HOST="redis://127.0.0.1:6379"
-DATABASE="default_database"
-TENANT="default_tenant"
-NAMESPACE="default_namespace"
+HOST="redis://127.0.0.1:6379" # DB URL/Endpoint
+DATABASE="default_database"   # DB Name (Chroma, Milvus, Qdrant, Surreal)
+INDEXES="default_indexes"     # Pinecone Index Name
+CLOUD="aws"                   # Pinecone Cloud Provider (aws, azure, gcp)
+REGION="us-east-1"            # Pinecone Cloud Region
+TENANT="default_tenant"       # Chroma Tenant
+NAMESPACE="default_namespace" # SurrealDB/Pinecone Namespace
 
 # Vector settings
 DIMENSION=768
-METRIC="cosine"
+METRIC="cosine" # l2, ip, cosine, euclidean, dotproduct (Not all DBs support all)
 
 # Batch processing options
-PAYLOAD_SIZE_MB=12
-CHUNK_SIZE=10
+PAYLOAD_SIZE_MB=12 # Max HTTP payload size for DB requests
+CHUNK_SIZE=10      # Number of records per DB storage batch
 
 # Embedding configuration
 EMBEDDING_URL="http://localhost:11434"
@@ -87,11 +92,11 @@ EMBEDDING_MAX_TOKENS=8000
 OLLAMA_TIMEOUT=60
 
 # Performance settings
-NUM_THREADS=0
+NUM_THREADS=0 # 0 = auto-detect CPU cores
 
 # Special behaviors
 DEBUG="false"
-GROUP_REDIS="false"
+GROUP_REDIS="false" # Use Redis grouping vs individual keys
 ```
 
 ---
@@ -155,38 +160,61 @@ cargo run -- [OPTIONS]
 # Binary
 ./target/release/db2vec [OPTIONS]
 
-# Log (info)
-RUST_LOG=info 
-
-# Debug  
-RUST_LOG=debug  --debug
+# Logging
+RUST_LOG=info ./target/release/db2vec [OPTIONS]
+RUST_LOG=debug --debug
 ```
 
 **Options:**
 
-* `-f, --data-file <FILE>`               Path to `.sql`/`.surql` dump [default: `./surreal.surql`]
-* `-t, --db-export-type <TYPE>`          `redis|chroma|milvus|qdrant|surreal|pinecone` [default: `redis`]
-* `-u, --user <USER>`                    Username for DB auth [default: `root`]
-* `-p, --pass <PASS>`                    Password for DB auth [default: `""`]
-* `-k, --secret <SECRET>`                API key/token for DB auth [default: `""`]
-* `--use-auth`                           Enable authentication [default: `false`]
-* `--debug`                              Enable debug mode [default: `false`]
-* `--host <HOST>`                        Target DB URL/host [env: `HOST`, default: `redis://127.0.0.1:6379`]
-* `--database <DATABASE>`                Target DB name [env: `DATABASE`, default: `default_database`]
-* `--tenant <TENANT>`                    (Chroma) Tenant name [env: `TENANT`, default: `default_tenant`]
-* `--namespace <NAMESPACE>`              (SurrealDB/Pinecone) Namespace [env: `NAMESPACE`, default: `default_namespace`]
-* `--dimension <DIMENSION>`              Vector dimension [env: `DIMENSION`, default: `768`]
-* `--metric <METRIC>`                    Distance metric  example `ip|cosine|euclidean|dotproduct` [env: `METRIC`, default: `cosine`]
-* `-m, --max-payload-size-mb <MB>`       Maximum payload size in MB for database requests [default: `12`]
-* `-c, --chunk-size <N>`                 Number of items to process in each database batch [default: `10`]
-* `--embedding-model <MODEL>`            Ollama model name [env: `EMBEDDING_MODEL`, default: `nomic-embed-text`]
-* `--embedding-url <URL>`                Embedding API endpoint [env: `EMBEDDING_URL`, default: `http://localhost:11434`]
-* `--embedding-max-concurrency <N>`      Max parallel embedding requests [env: `EMBEDDING_MAX_CONCURRENCY`, default: `4`]
-* `--embedding-batch-size <N>`           Prompts per batch API call [env: `EMBEDDING_BATCH_SIZE`, default: `16`]
-* `--embedding-max-tokens <N>`           Text truncation limit [env: `EMBEDDING_MAX_TOKENS`, default: `8000`]
-* `--embedding-timeout <SEC>`            Ollama request timeout [env: `OLLAMA_TIMEOUT`, default: `60`]
-* `--num-threads <N>`                    CPU threads for parallel processing (0=auto-detect) [env: `NUM_THREADS`, default: `0`]
-* `--group-redis`                        Group Redis records by table name (vs storing as individual entries) [default: `false`]
+* `-f, --data-file <FILE>`           Path to the `.sql`/`.surql` dump [env: FILE_PATH, default: `./surreal.surql`]
+* `-t, --db-export-type <TYPE>`      Target DB type: `redis|chroma|milvus|qdrant|surreal|pinecone` [env: TYPE, default: `redis`]
+* `-u, --user <USER>`                Username for DB auth (Milvus, SurrealDB) [env: USER, default: `root`]
+* `-p, --pass <PASS>`                Password for DB auth (Milvus, SurrealDB, Redis) [env: PASS, default: `""`]
+* `-k, --secret <SECRET>`            API key / token (Chroma, Qdrant, Pinecone) [env: SECRET, default: `""`]
+* `--use-auth`                       Enable authentication for the vector database [env: AUTH, default: `false`]
+* `--debug`                          Enable debug mode (prints parsed JSON) [env: DEBUG, default: `false`]
+* `--host <HOST>`                    DB URL / host endpoint.  
+                                    – Redis: `redis://127.0.0.1:6379`  
+                                    – Pinecone Cloud: full data‑plane URL (e.g. `https://index‑123.svc.us‑east‑1.pinecone.io`)  
+                                    [env: HOST, default: `redis://127.0.0.1:6379`]
+* `--database <DATABASE>`            Target database name (Chroma, Milvus, Qdrant, Surreal) [env: DATABASE, default: `default_database`]
+* `--indexes <INDEXES>`              Pinecone index name (will be created/described on Cloud) [env: INDEXES, default: `default_indexes`]
+* `--cloud <CLOUD>`                  Pinecone cloud provider: `aws|azure|gcp` [env: CLOUD, default: `aws`]
+* `--region <REGION>`                Pinecone cloud region (e.g. `us-east-1`) [env: REGION, default: `us-east-1`]
+* `--tenant <TENANT>`                Chroma multi-tenant name [env: TENANT, default: `default_tenant`]
+* `--dimension <DIMENSION>`          Vector dimension size (must match embedding model) [env: DIMENSION, default: `768`]
+* `--metric <METRIC>`                Distance metric: `l2|ip|cosine|euclidean|dotproduct` [env: METRIC, default: `cosine`]
+* `-m, --max-payload-size-mb <MB>`   Max payload size in MB [env: PAYLOAD_SIZE_MB, default: `12`]
+* `-c, --chunk-size <N>`             Number of records per batch insert [env: CHUNK_SIZE, default: `10`]
+* `--embedding-model <MODEL>`        Ollama model name [env: EMBEDDING_MODEL, default: `nomic-embed-text`]
+* `--embedding-url <URL>`            Ollama API endpoint [env: EMBEDDING_URL, default: `http://localhost:11434`]
+* `--embedding-max-concurrency <N>`  Parallel embedding requests [env: EMBEDDING_MAX_CONCURRENCY, default: `4`]
+* `--embedding-batch-size <N>`       Texts per embedding batch [env: EMBEDDING_BATCH_SIZE, default: `16`]
+* `--embedding-max-tokens <N>`       Max tokens per embedding request [env: EMBEDDING_MAX_TOKENS, default: `8000`]
+* `--embedding-timeout <SEC>`        Embedding timeout in seconds [env: OLLAMA_TIMEOUT, default: `60`]
+* `--num-threads <N>`                CPU threads (0=auto‑detect) [env: NUM_THREADS, default: `0`]
+* `--group-redis`                    Group Redis records by table name (vs individual keys) [env: GROUP_REDIS, default: `false`]
+
+---
+
+## Pinecone Cloud Support
+
+When `-t pinecone` is selected and `--host` is not a local URL:
+
+1.  **Create / Describe Index**  
+    - Uses the control plane `https://api.pinecone.io/indexes`  
+    - Requires `--indexes`, `--secret` (API key), `--cloud`, and `--region`  
+    - If the index does not exist, it is created with your `--dimension` and `--metric`  
+    - On `409 Conflict`, the existing index is described to retrieve its data‑plane host  
+
+2.  **Data‑Plane Upserts**  
+    - Vectors are upserted to `https://<your-index-host>`  
+    - Namespace = source table name (each table is a separate namespace)  
+    - Metadata includes a `"table": "<table_name>"` field  
+
+> **Note:** For local Pinecone dev images, index creation via API may not be supported.  
+> Ensure your index exists or provide the full data‑plane URL with `--host`.
 
 ---
 
