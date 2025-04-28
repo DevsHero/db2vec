@@ -1,7 +1,14 @@
 [package]
 name = "db2vec"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
+authors = ["Thanon Aphithanawat"]
+description = "High-performance tool to parse database dumps, generate vector embeddings, and load them into vector databases"
+readme = "README.md"
+repository = "https://github.com/DevsHero/db2vec"
+license = "MIT"
+keywords = ["vector-database", "embedding", "ollama", "database-export", "vector-search"]
+categories = ["database", "command-line-utilities", "text-processing"]
 
 [dependencies]
 redis = "0.29"
@@ -24,4 +31,4 @@ once_cell = "1"
 rayon = "1"
 num_cpus = "1"
 lazy_static = "1.5.0"
- 
+
