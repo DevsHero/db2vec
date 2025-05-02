@@ -8,7 +8,7 @@ use clap::Parser;
 use cli::Args;
 use db::select_database;
 use dotenvy::dotenv;
-use embedding::embeding::initialize_from_args;
+
 use log::{ info, error };
 use crate::util::{ read_file_and_detect_format, logo };
 use parser::parse_database_export;
@@ -21,8 +21,6 @@ fn main() -> Result<(), db::DbError> {
     let args = Args::parse();
     let file_path = args.data_file.clone();
     util::init_thread_pool(args.num_threads);
-
-    initialize_from_args(&args);
 
     let (content, format) = match read_file_and_detect_format(&file_path) {
         Ok(result) => result,

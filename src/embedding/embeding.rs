@@ -1,402 +1,150 @@
-use log::{ debug, error, info, warn };
-use reqwest::blocking::Client as HttpClient;
-use serde_json::{ json, Value };
-use std::{ time::Duration, sync::OnceLock };
-use rayon::prelude::*;
+use log::{ error, info };
+use serde_json::Value;
+use std::error::Error as StdError;
 use std::sync::atomic::{ AtomicUsize, Ordering };
 use std::sync::Arc;
-use crate::cli::Args;
+use tokio::runtime::Runtime;
 use uuid::Uuid;
+use crate::cli::Args;
+use crate::embedding::{
+    models::google::GoogleEmbeddingClient,
+    models::ollama::OllamaEmbeddingClient,
+    models::rust_bert::RustBertEmbeddingClient,
+    AsyncEmbeddingGenerator,
+};
 
-pub struct EmbeddingConfig {
-    pub model: String,
-    pub url: String,
-    pub batch_size: usize,
-    pub max_concurrency: usize,
-    pub max_tokens: usize,
-    pub timeout: Duration,
-    pub max_retries: usize,
-    pub retry_delay: Duration,
-    pub dimension: usize,
-}
-
-static SERVICE: OnceLock<EmbeddingService> = OnceLock::new();
-static ACTIVE_REQUESTS: AtomicUsize = AtomicUsize::new(0);
-
-pub fn initialize_from_args(args: &Args) {
-    initialize(
-        &args.embedding_model,
-        &args.embedding_url,
-        args.embedding_batch_size,
-        args.embedding_concurrency,
-        args.embedding_max_tokens,
-        args.embedding_timeout,
-        args.dimension
-    );
-}
-
-pub fn initialize(
-    model: &str,
-    url: &str,
-    batch_size: usize,
-    concurrency: usize,
-    max_tokens: usize,
-    timeout: u64,
-    dimension: usize
-) {
-    let api_url = if url.ends_with("/api/embeddings") {
-        url.to_string()
+fn get_device() -> tch::Device {
+    if tch::Cuda::is_available() {
+        info!("Using CUDA device");
+        tch::Device::Cuda(0)
     } else {
-        format!("{}/api/embeddings", url.trim_end_matches('/'))
-    };
-
-    let api_url_for_log = api_url.clone();
-    let config = EmbeddingConfig {
-        model: model.to_string(),
-        url: api_url,
-        batch_size,
-        max_concurrency: concurrency,
-        max_tokens,
-        timeout: Duration::from_secs(timeout),
-        max_retries: 3,
-        retry_delay: Duration::from_secs(2),
-        dimension,
-    };
-
-    let client = HttpClient::builder()
-        .timeout(config.timeout)
-        .build()
-        .expect("Failed to create HTTP client");
-
-    let service = EmbeddingService { client, config };
-
-    if SERVICE.set(service).is_ok() {
-        info!("Initialized embedding service with model '{}' at {}", model, api_url_for_log);
+        info!("Using CPU device");
+        tch::Device::Cpu
     }
 }
 
-struct EmbeddingService {
-    client: HttpClient,
-    config: EmbeddingConfig,
-}
+pub fn initialize_embedding_generator(
+    args: &Args
+) -> Result<Box<dyn AsyncEmbeddingGenerator + Send + Sync>, Box<dyn StdError + Send + Sync>> {
+    let provider = args.embedding_provider.to_lowercase();
+    info!("Selected embedding provider: {}", provider);
 
-impl EmbeddingService {
-    fn generate_single(&self, text: &str) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
-        let current = ACTIVE_REQUESTS.fetch_add(1, Ordering::SeqCst);
-        if current >= self.config.max_concurrency {
-            debug!("Waiting for available embedding slot (current: {})", current);
-            std::thread::sleep(Duration::from_millis(100));
+    match provider.as_str() {
+        "ollama" => {
+            let client = OllamaEmbeddingClient::new(
+                &args.embedding_url,
+                &args.embedding_model,
+                args.dimension
+            )?;
+            Ok(Box::new(client))
         }
+        "google" => {
+            let api_key = args.embedding_api_key
+                .clone()
+                .ok_or_else(|| {
+                    "GOOGLE_API_KEY or --embedding-api-key is required when using the 'google' embedding provider".to_string()
+                })?;
 
-        struct RequestGuard;
-        impl Drop for RequestGuard {
-            fn drop(&mut self) {
-                ACTIVE_REQUESTS.fetch_sub(1, Ordering::SeqCst);
-            }
+            let client = GoogleEmbeddingClient::new(
+                api_key,
+                Some(args.embedding_model.clone()),
+                args.dimension
+            )?;
+
+            let client = client.with_task_type(&args.embedding_task_type);
+
+            Ok(Box::new(client))
         }
-        let _guard = RequestGuard;
-        let trimmed_text = if text.len() > self.config.max_tokens {
-            &text[0..self.config.max_tokens]
-        } else {
-            text
-        };
-
-        for attempt in 0..self.config.max_retries {
-            if attempt > 0 {
-                debug!(
-                    "Retrying embedding request (attempt {}/{})",
-                    attempt + 1,
-                    self.config.max_retries
-                );
-                std::thread::sleep(self.config.retry_delay);
-            }
-
-            let response = self.client
-                .post(&self.config.url)
-                .header("Content-Type", "application/json")
-                .json(
-                    &json!({
-                        "model": self.config.model,
-                        "prompt": trimmed_text
-                    })
-                )
-                .send()?;
-
-            if !response.status().is_success() {
-                warn!("Embedding API returned status: {}", response.status());
-                continue;
-            }
-
-            let json = response.json::<Value>()?;
-            if let Some(embedding_array) = json["embedding"].as_array() {
-                let embedding: Vec<f32> = embedding_array
-                    .iter()
-                    .filter_map(|v| v.as_f64().map(|f| f as f32))
-                    .collect();
-
-                debug!("Generated embedding with {} dimensions", embedding.len());
-                return Ok(embedding);
-            } else {
-                error!("Unexpected response structure: {:?}", json);
-            }
+        "rustbert" => {
+            let device = get_device();
+            let client = RustBertEmbeddingClient::new(&args.embedding_model, device)?;
+            Ok(Box::new(client))
         }
-
-        Err("Failed to get embeddings after retries".into())
+        _ => Err(format!("Unsupported embedding provider: {}", provider).into()),
     }
-
-    fn generate_batch(
-        &self,
-        texts: &[String]
-    ) -> Result<Vec<Vec<f32>>, Box<dyn std::error::Error>> {
-        if texts.is_empty() {
-            return Ok(vec![]);
-        }
-
-        if texts.len() > self.config.batch_size {
-            info!(
-                "Large batch of {} texts split into chunks of {}",
-                texts.len(),
-                self.config.batch_size
-            );
-
-            let mut results = Vec::new();
-            for (i, chunk) in texts.chunks(self.config.batch_size).enumerate() {
-                info!(
-                    "Processing chunk {}/{}",
-                    i + 1,
-                    (texts.len() + self.config.batch_size - 1) / self.config.batch_size
-                );
-
-                let chunk_results = self.process_batch_chunk(chunk)?;
-                results.extend(chunk_results);
-            }
-
-            return Ok(results);
-        }
-
-        self.process_batch_chunk(texts)
-    }
-
-    fn process_batch_chunk(
-        &self,
-        texts: &[String]
-    ) -> Result<Vec<Vec<f32>>, Box<dyn std::error::Error>> {
-        info!("Batch embedding {} texts using model {}", texts.len(), self.config.model);
-
-        let response = self.client
-            .post(&self.config.url)
-            .json(
-                &json!({
-                    "model": self.config.model,
-                    "prompts": texts
-                })
-            )
-            .send();
-
-        if let Ok(resp) = response {
-            if resp.status().is_success() {
-                let parsed: Value = resp.json()?;
-
-                if let Some(embeddings) = parsed.get("embeddings").and_then(|e| e.as_array()) {
-                    let mut result = Vec::with_capacity(embeddings.len());
-
-                    for emb in embeddings {
-                        if let Some(vector) = emb.get("embedding").and_then(|v| v.as_array()) {
-                            let embedding: Vec<f32> = vector
-                                .iter()
-                                .filter_map(|v| v.as_f64().map(|f| f as f32))
-                                .collect();
-
-                            result.push(embedding);
-                        }
-                    }
-
-                    if result.len() == texts.len() {
-                        info!("Successfully processed batch of {} embeddings", result.len());
-                        return Ok(result);
-                    }
-                }
-
-                warn!(
-                    "Batch embedding response format unexpected, falling back to individual requests"
-                );
-            }
-        }
-
-        info!("Using fallback method: parallel individual embedding requests");
-        let results: Vec<Vec<f32>> = texts
-            .par_iter()
-            .map(|text| {
-                self.generate_single(text).unwrap_or_else(|e| {
-                    error!("Single embedding failed: {}", e);
-                    Vec::new()
-                })
-            })
-            .collect();
-
-        let valid_results: Vec<Vec<f32>> = results
-            .into_iter()
-            .filter(|v| !v.is_empty())
-            .collect();
-
-        if valid_results.len() != texts.len() {
-            warn!(
-                "Some embeddings failed: got {} out of {} requested",
-                valid_results.len(),
-                texts.len()
-            );
-        }
-
-        Ok(valid_results)
-    }
-}
-
-pub fn generate_embedding(text: &str) -> Vec<f32> {
-    if let Some(service) = SERVICE.get() {
-        match service.generate_single(text) {
-            Ok(vector) => {
-                return vector;
-            }
-            Err(e) => {
-                warn!("Embedding generation failed: {}", e);
-            }
-        }
-    }
-
-    let dimension = SERVICE.get()
-        .map(|s| s.config.dimension)
-        .unwrap_or(768);
-    let result = vec![0.0; dimension];
-    result
-}
-
-pub fn generate_embeddings_batch(
-    texts: &[String]
-) -> Result<Vec<Vec<f32>>, Box<dyn std::error::Error>> {
-    if texts.is_empty() {
-        return Ok(vec![]);
-    }
-
-    if let Some(service) = SERVICE.get() {
-        service.generate_batch(texts)
-    } else {
-        Err("Embedding service not initialized".into())
-    }
-}
-
-#[deprecated(note = "Use initialize_from_args instead")]
-pub fn generate_embedding_with_params(
-    text: &str,
-    model: &str,
-    embedding_url: &str,
-    timeout: u64,
-    max_tokens: usize
-) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
-    if let Some(service) = SERVICE.get() {
-        return service.generate_single(text);
-    }
-
-    let api_url = if embedding_url.ends_with("/api/embeddings") {
-        embedding_url.to_string()
-    } else {
-        format!("{}/api/embeddings", embedding_url.trim_end_matches('/'))
-    };
-
-    let config = EmbeddingConfig {
-        model: model.to_string(),
-        url: api_url,
-        batch_size: 16,
-        max_concurrency: 4,
-        max_tokens,
-        timeout: Duration::from_secs(timeout),
-        max_retries: 3,
-        retry_delay: Duration::from_secs(2),
-        dimension: 768,
-    };
-
-    let client = HttpClient::builder().timeout(config.timeout).build()?;
-    let service = EmbeddingService { client, config };
-    service.generate_single(text)
-}
-
-#[deprecated(note = "Use initialize_from_args instead")]
-pub fn generate_embeddings_batch_with_params(
-    texts: &[String],
-    model: &str,
-    concurrency: usize,
-    embedding_url: &str,
-    timeout: u64,
-    max_tokens: usize
-) -> Result<Vec<Vec<f32>>, Box<dyn std::error::Error>> {
-    if texts.is_empty() {
-        return Ok(vec![]);
-    }
-
-    let api_url = if embedding_url.ends_with("/api/embeddings") {
-        embedding_url.to_string()
-    } else {
-        format!("{}/api/embeddings", embedding_url.trim_end_matches('/'))
-    };
-
-    let config = EmbeddingConfig {
-        model: model.to_string(),
-        url: api_url,
-        batch_size: 16,
-        max_concurrency: concurrency,
-        max_tokens,
-        timeout: Duration::from_secs(timeout),
-        max_retries: 3,
-        retry_delay: Duration::from_secs(2),
-        dimension: 768,
-    };
-
-    let client = HttpClient::builder().timeout(config.timeout).build()?;
-    let service = EmbeddingService { client, config };
-    service.generate_batch(texts)
 }
 
 pub fn process_records_with_embeddings(
     records: Vec<Value>,
     args: &Args,
-    embedding_counter: Arc<AtomicUsize>
-) -> Vec<(String, String, Vec<f32>, Value)> {
+    embedding_counter: Arc<AtomicUsize>,
+    generator: Box<dyn AsyncEmbeddingGenerator + Send + Sync>
+) -> Result<Vec<(String, String, Vec<f32>, Value)>, Box<dyn StdError + Send + Sync>> {
     let chunk_size = args.embedding_batch_size;
-    let prepared_records: Vec<_> = records
-        .par_chunks(chunk_size)
-        .flat_map(|chunk| {
-            let texts: Vec<String> = chunk
-                .iter()
-                .map(|record| serde_json::to_string(record).unwrap())
-                .collect();
+    let total_records = records.len();
+    let mut prepared_records = Vec::with_capacity(total_records);
 
-            let embeddings = match generate_embeddings_batch(&texts) {
-                Ok(embs) => embs,
-                Err(e) => {
-                    warn!("Batch embedding failed: {}, falling back to single processing", e);
-                    chunk
-                        .par_iter()
-                        .map(|record| {
-                            generate_embedding(&serde_json::to_string(record).unwrap())
-                        })
-                        .collect()
+    let rt = Runtime::new()?;
+
+    for (chunk_idx, chunk) in records.chunks(chunk_size).enumerate() {
+        info!(
+            "Processing embedding chunk {}/{}",
+            chunk_idx + 1,
+            (total_records + chunk_size - 1) / chunk_size
+        );
+
+        let texts: Vec<String> = chunk
+            .iter()
+            .map(|record| {
+                record
+                    .as_object()
+                    .map(|obj| {
+                        obj.iter()
+                            .filter(|(k, _)| *k != "table" && *k != "id")
+                            .map(|(k, v)| format!("{}: {}", k, v))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_else(|| record.to_string())
+            })
+            .collect();
+
+        let embeddings_result = rt.block_on(generator.generate_embeddings_batch(&texts));
+
+        match embeddings_result {
+            Ok(embeddings) => {
+                if embeddings.len() != chunk.len() {
+                    error!(
+                        "CRITICAL: Embedding generator returned {} results for {} inputs in chunk {}",
+                        embeddings.len(),
+                        chunk.len(),
+                        chunk_idx + 1
+                    );
+                    return Err(
+                        format!(
+                            "Embedding generator returned incomplete results: got {}/{}",
+                            embeddings.len(),
+                            chunk.len()
+                        ).into()
+                    );
                 }
-            };
 
-            let _ = embedding_counter.fetch_add(chunk.len(), Ordering::Relaxed);
+                let chunk_results: Vec<_> = chunk
+                    .iter()
+                    .zip(embeddings.into_iter())
+                    .map(|(record, vec)| {
+                        let id = Uuid::new_v4().to_string();
+                        let mut meta = record.clone();
+                        let table = meta
+                            .get("table")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("unknown_table")
+                            .to_string();
+                        if let Some(_obj) = meta.as_object_mut() {
+                        }
+                        (table, id, vec, meta)
+                    })
+                    .collect();
 
-            chunk
-                .iter()
-                .zip(embeddings.into_iter())
-                .map(|(record, vec)| {
-                    let id = Uuid::new_v4().to_string();
-                    let mut meta = record.clone();
-                    meta.as_object_mut().unwrap().remove("table");
-                    let table = record.get("table").unwrap().as_str().unwrap().to_string();
-                    (table, id, vec, meta)
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect();
+                prepared_records.extend(chunk_results);
+                embedding_counter.fetch_add(chunk.len(), Ordering::Relaxed);
+            }
+            Err(e) => {
+                error!("CRITICAL: Embedding generation failed for chunk {}: {}", chunk_idx + 1, e);
+                return Err(format!("Embedding generation failed: {}", e).into());
+            }
+        }
+    }
 
-    prepared_records
+    Ok(prepared_records)
 }

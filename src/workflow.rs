@@ -1,8 +1,8 @@
 use crate::cli::Args;
 use crate::db::{ Database, DbError, store_in_batches };
-use crate::embedding::embeding::process_records_with_embeddings;
+use crate::embedding::embeding::{ initialize_embedding_generator, process_records_with_embeddings };
 use crate::util::spinner::start_spinner_animation;
-use log::info;
+use log::{ info, warn, error };
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -21,6 +21,23 @@ pub fn execute_migration_workflow(
     args: &Args
 ) -> Result<MigrationStats, DbError> {
     let total_records = records.len();
+    if total_records == 0 {
+        warn!("No records to process");
+        return Ok(MigrationStats {
+            total_records: 0,
+            processed_records: 0,
+            elapsed_seconds: 0.0,
+        });
+    }
+
+    let generator = match initialize_embedding_generator(args) {
+        Ok(generator_instance) => generator_instance,
+        Err(e) => {
+            error!("CRITICAL: Failed to initialize embedding generator: {}", e);
+            return Err(format!("Failed to initialize embedding generator: {}", e).into());
+        }
+    };
+
     let start_time = Instant::now();
     let embedding_count = Arc::new(AtomicUsize::new(0));
     let embedding_animation = start_spinner_animation(
@@ -28,44 +45,72 @@ pub fn execute_migration_workflow(
         total_records,
         "Generating embeddings"
     );
-    let prepared_records = process_records_with_embeddings(records, args, embedding_count.clone());
+
+    info!("Starting embedding generation for {} records", total_records);
+
+    let prepared_records = match
+        process_records_with_embeddings(records, args, embedding_count.clone(), generator)
+    {
+        Ok(records) => records,
+        Err(e) => {
+            embedding_animation.stop();
+            error!("CRITICAL: Embedding generation failed: {}", e);
+            return Err(format!("Embedding generation critical error: {}", e).into());
+        }
+    };
 
     embedding_animation.stop();
-    println!("\nEmbedding generation complete! Processing data...");
 
-    let mut grouped_records: HashMap<String, Vec<(String, Vec<f32>, Value)>> = HashMap::new();
-    for (table, id, vec, meta) in prepared_records {
-        grouped_records.entry(table).or_insert_with(Vec::new).push((id, vec, meta));
-    }
+    if prepared_records.is_empty() {
+        warn!("No records were prepared for storage after embedding process.");
+    } else {
+        println!("\nEmbedding generation complete! Storing data...");
 
-    let processed_count = Arc::new(AtomicUsize::new(0));
-    let storage_animation = start_spinner_animation(
-        processed_count.clone(),
-        total_records,
-        "Storing in database"
-    );
-
-    let max_payload_bytes = args.max_payload_size_mb * 1024 * 1024;
-    let chunk_size = args.chunk_size;
-
-    for (table, items) in grouped_records {
-        info!("Storing {} items for table '{}'", items.len(), table);
-        for batch in items.chunks(chunk_size) {
-            store_in_batches(database, &table, batch, max_payload_bytes)?;
-            processed_count.fetch_add(batch.len(), Ordering::Relaxed);
+        let mut grouped_records: HashMap<String, Vec<(String, Vec<f32>, Value)>> = HashMap::new();
+        for (table, id, vec, meta) in prepared_records {
+            grouped_records.entry(table).or_insert_with(Vec::new).push((id, vec, meta));
         }
-    }
 
-    storage_animation.stop();
+        let processed_count = Arc::new(AtomicUsize::new(0));
+        let storage_animation = start_spinner_animation(
+            processed_count.clone(),
+            total_records,
+            "Storing in database"
+        );
+
+        let max_payload_bytes = args.max_payload_size_mb * 1024 * 1024;
+        let chunk_size = args.chunk_size;
+
+        for (table, items) in grouped_records {
+            info!("Storing {} items for table '{}'", items.len(), table);
+            for batch in items.chunks(chunk_size) {
+                match store_in_batches(database, &table, batch, max_payload_bytes) {
+                    Ok(_) => {
+                        let _ = processed_count.fetch_add(batch.len(), Ordering::Relaxed);
+                    }
+                    Err(e) => {
+                        storage_animation.stop();
+                        error!("CRITICAL: Database storage error for table '{}': {}", table, e);
+                        return Err(format!("Database storage error: {}", e).into());
+                    }
+                }
+            }
+        }
+        storage_animation.stop();
+    }
 
     let elapsed_time = start_time.elapsed();
-    let final_count = processed_count.load(Ordering::Relaxed);
+    let final_count = embedding_count.load(Ordering::Relaxed);
 
     println!(
         "\nFinished processing {} records in {:.2} seconds ({:.1} records/sec)",
-        total_records,
+        final_count,
         elapsed_time.as_secs_f64(),
-        (total_records as f64) / elapsed_time.as_secs_f64()
+        if elapsed_time.as_secs_f64() > 0.0 {
+            (final_count as f64) / elapsed_time.as_secs_f64()
+        } else {
+            0.0
+        }
     );
     println!("Migration Complete.");
 

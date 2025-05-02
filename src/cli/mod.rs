@@ -81,7 +81,15 @@ pub struct Args {
     #[arg(short = 'c', env = "CHUNK_SIZE", long, default_value = "10")]
     pub chunk_size: usize, // Fixed typo: chuck_size -> chunk_size
 
-    /// Embedding model to use with Ollama
+    /// Embedding provider to use ('ollama' or 'google')
+    #[arg(long, env = "EMBEDDING_PROVIDER", default_value = "ollama")]
+    pub embedding_provider: String,
+
+    /// API Key for the Google AI API (required if embedding_provider is 'google')
+    #[arg(long, env = "EMBEDDING_API_KEY")]
+    pub embedding_api_key: Option<String>,
+
+    /// Embedding model to use (provider-specific, e.g., 'nomic-embed-text' for ollama, 'text-embedding-004' for google)
     #[arg(long, env = "EMBEDDING_MODEL", default_value = "nomic-embed-text")]
     pub embedding_model: String,
 
@@ -104,7 +112,8 @@ pub struct Args {
     /// Timeout in seconds for embedding requests
     #[arg(long, env = "OLLAMA_TIMEOUT", default_value = "60")]
     pub embedding_timeout: u64,
-
+    #[arg(long, env = "EMBEDDING_TASK_TYPE", default_value = "SEMANTIC_SIMILARITY")]
+    pub embedding_task_type: String,
     /// CPU threads for parallel processing (0=auto-detect)
     #[arg(long, env = "NUM_THREADS", default_value = "0")]
     pub num_threads: usize,
