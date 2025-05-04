@@ -14,7 +14,7 @@ pub struct MilvusDatabase {
 
 impl MilvusDatabase {
     pub fn new(args: &crate::cli::Args) -> Result<Self, DbError> {
-        let url = args.host.trim_end_matches('/').to_string();
+        let url = args.vector_host.trim_end_matches('/').to_string();
         let db_name = args.database.clone();
         let token = if args.use_auth {
             if !args.secret.is_empty() {

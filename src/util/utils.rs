@@ -5,6 +5,9 @@ use encoding_rs::UTF_16LE;
 use encoding_rs_io::DecodeReaderBytesBuilder;
 use log::info;
 use crate::parser::detect_format;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use crate::util::spinner::{ start_spinner_animation, AnimationHandle };
 
 pub fn read_file_content<P: AsRef<Path>>(file_path: P) -> IoResult<String> {
     info!("Reading file: {}", file_path.as_ref().display());
@@ -36,6 +39,7 @@ pub fn read_file_and_detect_format<P: AsRef<Path>>(file_path: P) -> IoResult<(St
 
     Ok((content, format))
 }
+
 pub fn logo() {
     println!(
         r#"
@@ -47,6 +51,8 @@ pub fn logo() {
     );
     println!("Database to Vector Migration Tool\n");
 }
+
+
 pub fn init_thread_pool(num_threads: usize) {
     let thread_count = if num_threads == 0 { num_cpus::get() } else { num_threads };
     rayon::ThreadPoolBuilder::new().num_threads(thread_count).build_global().unwrap();

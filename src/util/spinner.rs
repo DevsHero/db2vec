@@ -54,3 +54,10 @@ pub fn start_spinner_animation(
 
     AnimationHandle { thread, stop_flag }
 }
+
+pub fn start_operation_animation(message: &str) -> (AnimationHandle, Arc<AtomicUsize>) {
+    let counter = Arc::new(AtomicUsize::new(0));
+    let total = 100; 
+    let handle = start_spinner_animation(counter.clone(), total, message);
+    (handle, counter)
+}

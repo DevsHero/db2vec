@@ -14,8 +14,8 @@ pub struct RedisDatabase {
 
 impl RedisDatabase {
     pub fn new(args: &crate::cli::Args) -> Result<Self, DbError> {
-        info!("Connecting to Redis at {}", args.host);
-        let client = Client::open(args.host.as_str()).map_err(
+        info!("Connecting to Redis at {}", args.vector_host);
+        let client = Client::open(args.vector_host.as_str()).map_err(
             |e|
                 Box::new(
                     IoError::new(ErrorKind::Other, format!("Failed to open Redis client: {}", e))

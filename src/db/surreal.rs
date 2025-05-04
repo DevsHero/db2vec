@@ -14,7 +14,7 @@ pub struct SurrealDatabase {
 
 impl SurrealDatabase {
     pub fn new(args: &crate::cli::Args) -> Result<Self, DbError> {
-        let base_url = args.host.clone();
+        let base_url = args.vector_host.clone();
         let sql_url = format!("{}/sql", base_url.trim_end_matches('/'));
         let ns = args.namespace.clone();
         let db = args.database.clone();

@@ -2,6 +2,7 @@ use crate::cli::Args;
 use crate::db::{ Database, DbError, store_in_batches };
 use crate::embedding::embeding::{ initialize_embedding_generator, process_records_with_embeddings };
 use crate::util::spinner::start_spinner_animation;
+use crate::util::handle_tei::{start_and_wait_for_tei, ManagedProcess};
 use log::{ info, warn, error };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -18,7 +19,7 @@ pub struct MigrationStats {
 pub fn execute_migration_workflow(
     records: Vec<Value>,
     database: &dyn Database,
-    args: &Args
+    args: &Args,
 ) -> Result<MigrationStats, DbError> {
     let total_records = records.len();
     if total_records == 0 {
@@ -30,13 +31,20 @@ pub fn execute_migration_workflow(
         });
     }
 
-    let generator = match initialize_embedding_generator(args) {
-        Ok(generator_instance) => generator_instance,
-        Err(e) => {
-            error!("CRITICAL: Failed to initialize embedding generator: {}", e);
-            return Err(format!("Failed to initialize embedding generator: {}", e).into());
-        }
-    };
+    let mut tei_process: Option<ManagedProcess> = None;
+    let mut override_url: Option<String> = None;
+
+    if args.embedding_provider == "tei" && args.embedding_url.is_none() {
+        let args = args.clone();
+        let (proc, url) = std::thread::spawn(move || start_and_wait_for_tei(&args))
+            .join()
+            .map_err(|e| format!("TEI thread panicked: {:?}", e))??;
+        tei_process = Some(proc);
+        override_url = Some(url);
+    }
+
+    let generator = initialize_embedding_generator(args, override_url.as_deref())
+        .map_err(|e| DbError::from(format!("Init embed gen failed: {}", e)))?;
 
     let start_time = Instant::now();
     let embedding_count = Arc::new(AtomicUsize::new(0));
@@ -113,6 +121,10 @@ pub fn execute_migration_workflow(
         }
     );
     println!("Migration Complete.");
+
+    if let Some(mut p) = tei_process {
+        let _ = p.kill();
+    }
 
     Ok(MigrationStats {
         total_records,

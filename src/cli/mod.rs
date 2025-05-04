@@ -32,8 +32,8 @@ pub struct Args {
     pub debug: bool,
 
     /// Vector database URL/host endpoint
-    #[arg(long, env = "HOST", default_value = "redis://127.0.0.1:6379")]
-    pub host: String,
+    #[arg(long, env = "VECTOR_HOST", default_value = "redis://127.0.0.1:6379")]
+    pub vector_host: String,
 
     /// Target database name
     #[arg(long, env = "DATABASE", default_value = "default_database")]
@@ -94,8 +94,8 @@ pub struct Args {
     pub embedding_model: String,
 
     /// Embedding API endpoint URL
-    #[arg(long, env = "EMBEDDING_URL", default_value = "http://localhost:11434")]
-    pub embedding_url: String,
+    #[arg(long, env = "EMBEDDING_URL")]  // Remove the default_value
+    pub embedding_url: Option<String>,
 
     /// Maximum parallel embedding requests
     #[arg(long, env = "EMBEDDING_MAX_CONCURRENCY", default_value = "4")]
@@ -124,4 +124,12 @@ pub struct Args {
     /// into this pattern (item:table:46ef6eb2-a222-486f-a869-6c220a898758) .
     #[arg(long, env = "GROUP_REDIS", default_value = "false")]
     pub group_redis: bool,
+
+    // If embedding_url is NOT provided for TEI, db2vec will try to start it using this binary path
+    #[arg(long, env = "TEI_BINARY_PATH", default_value = "/Users/hero/Documents/GitHub/db2vec/tei")]
+    pub tei_binary_path: String,
+
+    // Port for the managed TEI server
+    #[arg(long, env = "TEI_LOCAL_PORT", default_value_t = 8080)]
+    pub tei_local_port: u16,
 }

@@ -15,7 +15,7 @@ pub struct ChromaDatabase {
 
 impl ChromaDatabase {
     pub fn new(args: &crate::cli::Args) -> Result<Self, DbError> {
-        let url = format!("{}/api/v2", args.host.trim_end_matches('/'));
+        let url = format!("{}/api/v2", args.vector_host.trim_end_matches('/'));
         let tenant = args.tenant.clone();
         let database = args.database.clone();
         let dimension = args.dimension;

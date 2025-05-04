@@ -13,7 +13,7 @@ pub struct QdrantDatabase {
 
 impl QdrantDatabase {
     pub fn new(args: &crate::cli::Args) -> Result<Self, DbError> {
-        let qdrant_url = args.host.clone();
+        let qdrant_url = args.vector_host.clone();
         let api_key = if args.use_auth && !args.secret.is_empty() {
             Some(args.secret.clone())
         } else {

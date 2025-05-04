@@ -1,8 +1,8 @@
-# db2vec: From Database Dumps to Vector Search at Speed (CPU Focused)
+# db2vec: From Database Dumps to Vector Search at Speed 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Tired of waiting hours for Python scripts to embed large database exports, especially on machines without powerful GPUs? So was I. Processing millions of records demands performance, even on standard hardware. `db2vec` is a high‑performance Rust tool designed for efficient **CPU-based embedding generation**. It parses your database dumps, generates vector embeddings using local models (Ollama, Rust-Bert) or cloud APIs (Google Gemini), and loads them into your vector database of choice – all optimized for speed without requiring a dedicated GPU.
+Tired of waiting hours for Python scripts to embed large database exports, especially on machines without powerful GPUs? So was I. Processing millions of records demands performance, even on standard hardware. `db2vec` is a high‑performance Rust tool designed for efficient **CPU-based embedding generation**. It parses your database dumps, generates vector embeddings using local models (Ollama, TEI) or cloud APIs (Google Gemini), and loads them into your vector database of choice – all optimized for speed without requiring a dedicated GPU.
 
 ![db2vec CLI running](assets/db2vec_screenshot.png)
 
@@ -23,9 +23,9 @@ Tired of waiting hours for Python scripts to embed large database exports, espec
         *   *Oracle requires exporting via SQL Developer or similar into standard SQL.*
     *   `.surql` (SurrealDB)
 *   🧠 **Flexible Embeddings:** Supports multiple providers:
-    *   **Ollama:** Use any compatible model running locally.
-    *   **Rust-Bert:** Built-in support for `all-MiniLM-L6-v2` (384-dim), running efficiently on CPU.
-    *   **Google Gemini:** Use models like `text-embedding-004` via API key.
+    *   **Ollama** – best for local CPU/GPU, extremely fast.
+    *   **TEI** – CPU-only Text Embeddings Inference (v1.7.0), slower than Ollama but faster than cloud. See [docs/TEI.md](docs/TEI.md) for details.
+    *   **Google Gemini** – cloud API, ideal if you have very limited local resources. Beware of rate limits; use small batch sizes to avoid throttling.
 *   💾 **Vector DB Targets:** Inserts vectors + metadata into:
     *   Chroma
     *   Milvus
@@ -45,7 +45,7 @@ Tired of waiting hours for Python scripts to embed large database exports, espec
 *   **Rust:** Latest stable (Edition 2021+).
 *   **Embedding Provider:** One of the following configured:
     *   **Ollama:** Running locally with your desired model(s) pulled (e.g., `ollama pull nomic-embed-text`).
-    *   **Rust-Bert:** No extra setup needed for the default `all-MiniLM-L6-v2` model; it runs directly on the CPU using bundled libraries.
+    *   **TEI:** Requires TEI binary (`tei-metal`) and compatible model (e.g., `nomic-embed-text-v2-moe`). See [docs/TEI.md](docs/TEI.md) for setup.
     *   **Google Gemini:** A valid Google Cloud API key (`--secret` or `EMBEDDING_API_KEY`) with the Generative Language API enabled for your project.
 *   **Target DB:** One of Chroma, Milvus, Pinecone, Qdrant, Redis Stack, SurrealDB (Docker recommended for local).
 *   **(Optional) `.env`:** For setting default configuration values.
@@ -57,6 +57,37 @@ Tired of waiting hours for Python scripts to embed large database exports, espec
 Configuration can be set using CLI flags or by creating a `.env` file in the project root. CLI flags always override values set in the `.env` file.
 
 Refer to the `.env-example` file for a comprehensive list of available environment variables, their descriptions, and default values.
+
+---
+
+## How It Works
+
+1.  **Read & Detect:** Load dump (`.sql`/`.surql`), detect SQL dialect or SurrealDB.
+2.  **Parse (Regex):** Extract records and types.
+3.  **Embed:** Call the selected embedding provider (`ollama`, `tei` on CPU, `google`) to get vectors.
+4.  **Auto-Schema:** Automatically create:
+    *   Target database if it doesn't exist
+    *   Collections/indices from table names in the dump
+    *   Proper dimension settings based on your `--dimension` parameter
+    *   Distance metrics using your specified `--metric` value
+5.  **Store:** Insert into your vector DB with metadata.
+
+---
+
+## Automatic Collection Creation
+
+For each table in your source data dump, `db2vec` automatically:
+
+*   Creates a corresponding collection/index in the target vector database
+*   Names the collection after the source table name
+*   Configures proper dimensions and metric type based on your CLI arguments
+*   Creates the database first if it doesn't exist
+
+This zero-config schema creation means you don't need to manually set up your vector database structure before import.
+
+> **Note:** When using Redis with `--group-redis`, collections aren't created in the traditional sense. Instead, records are grouped by table name into Redis data structures (e.g., `table:profile` → [records]). Without this flag, Redis stores each record as an individual entry with a table label in the metadata.
+>
+> **Warning:** If collections already exist, their dimension must match the `--dimension` parameter you provide. Some databases like Pinecone will reject vectors with mismatched dimensions, causing the import to fail.
 
 ---
 
@@ -88,27 +119,28 @@ Refer to the `.env-example` file for a comprehensive list of available environme
       -u root -p secret --use-auth \
       --debug
 
-    # MSSQL → Pinecone (using Google Gemini)
+    # SurrealDB → Pinecone (using TEI)
     ./target/release/db2vec \
-      -f mssql_dump.sql \
+      -f surreal_sample.surql \
       -t pinecone \
-      --host <INDEX_HOST> \
+      --host https://index-123.svc.us-east-1.pinecone.io \
       --namespace myns \
-      --embedding-provider google \
-      --embedding-model text-embedding-004 \
-      --dimension 768 \
-      --metric cosine \
-      --embedding-api-key <GOOGLE_API_KEY> \ # Use specific key arg
-      --use-auth
+      --embedding-provider tei \
+      --tei-binary-path tei/tei-metal \
+      --embedding-model nomic-embed-text-v2-moe \
+      --dimension 768
 
-    # SQLite → Qdrant (using built-in Rust-Bert on CPU)
+    # SQLite → Qdrant (using Google Gemini)
     ./target/release/db2vec \
       -f sqlite_dump.sql \
       -t qdrant \
       --host http://localhost:6333 \
-      --embedding-provider rustbert \
-      --dimension 384 \ # Must be 384 for the default all-MiniLM-L6-v2
-      --metric cosine
+      --embedding-provider google \
+      --embedding-model text-embedding-004 \
+      --dimension 768 \
+      --embedding-api-key <GOOGLE_API_KEY> \
+      --dimension 768 \
+      --debug
     ```
 
 ---
@@ -127,97 +159,17 @@ RUST_LOG=info ./target/release/db2vec [OPTIONS]
 RUST_LOG=debug ./target/release/db2vec --debug [OPTIONS]
 ```
 
-**Options:**
+## Compatibility
 
-*   `-f, --data-file <FILE>` Path to the `.sql`/`.surql` dump [env: FILE_PATH, default: `./surreal.surql`]
-*   `-t, --db-export-type <TYPE>` Target DB type: `redis|chroma|milvus|qdrant|surreal|pinecone` [env: TYPE, default: `redis`]
-*   `-u, --user <USER>` Username for DB auth (Milvus, SurrealDB) [env: USER, default: `root`]
-*   `-p, --pass <PASS>` Password for DB auth (Milvus, SurrealDB, Redis) [env: PASS, default: `""`]
-*   `-k, --secret <SECRET>` API key / token (Chroma, Qdrant, Pinecone) [env: SECRET, default: `""`]
-*   `--use-auth` Enable authentication for the vector database [env: AUTH, default: `false`]
-*   `--debug` Enable debug mode (prints parsed JSON) [env: DEBUG, default: `false`]
-*   `--host <HOST>` DB URL / host endpoint.
-    – Redis: `redis://127.0.0.1:6379`
-    – Pinecone Cloud: full data‑plane URL (e.g. `https://index‑123.svc.us‑east‑1.pinecone.io`)
-    [env: HOST, default: `redis://127.0.0.1:6379`]
-*   `--database <DATABASE>` Target database name (Chroma, Milvus, Qdrant, Surreal) [env: DATABASE, default: `default_database`]
-*   `--indexes <INDEXES>` Pinecone index name (will be created/described on Cloud) [env: INDEXES, default: `default_indexes`]
-*   `--cloud <CLOUD>` Pinecone cloud provider: `aws|azure|gcp` [env: CLOUD, default: `aws`]
-*   `--region <REGION>` Pinecone cloud region (e.g. `us-east-1`) [env: REGION, default: `us-east-1`]
-*   `--tenant <TENANT>` Chroma multi-tenant name [env: TENANT, default: `default_tenant`]
-*   `--namespace <NAMESPACE>` Namespace for databases that support it (SurrealDB, Pinecone) [env: NAMESPACE, default: `default_namespace`]
-*   `--dimension <DIMENSION>` Vector dimension size (must match embedding model output!) [env: DIMENSION, default: `768`]
-*   `--metric <METRIC>` Distance metric: `l2|ip|cosine|euclidean|dotproduct` [env: METRIC, default: `cosine`]
-*   `-m, --max-payload-size-mb <MB>` Max payload size in MB [env: PAYLOAD_SIZE_MB, default: `12`]
-*   `-c, --chunk-size <N>` Number of records per batch insert [env: CHUNK_SIZE, default: `10`]
-*   `--embedding-provider <PROVIDER>` Embedding provider: `ollama|rustbert|google` [env: EMBEDDING_PROVIDER, default: `ollama`]
-*   `--embedding-api-key <KEY>` API Key for Google Gemini (required if provider is 'google') [env: EMBEDDING_API_KEY]
-*   `--embedding-model <MODEL>` Model name (Ollama, Google) or path (local Rust-Bert override) [env: EMBEDDING_MODEL, default: `nomic-embed-text`]
-*   `--embedding-url <URL>` API endpoint for Ollama or Google [env: EMBEDDING_URL, default: `http://localhost:11434`]
-*   `--embedding-task-type <TYPE>` Optional task type for Google Gemini API [env: EMBEDDING_TASK_TYPE, default: `SEMANTIC_SIMILARITY`]
-*   `--embedding-max-concurrency <N>` Parallel embedding requests [env: EMBEDDING_MAX_CONCURRENCY, default: `4`]
-*   `--embedding-batch-size <N>` Texts per embedding batch [env: EMBEDDING_BATCH_SIZE, default: `16`]
-*   `--embedding-max-tokens <N>` Max tokens per embedding request (provider specific) [env: EMBEDDING_MAX_TOKENS, default: `8000`]
-*   `--embedding-timeout <SEC>` Embedding timeout in seconds [env: OLLAMA_TIMEOUT, default: `60`]
-*   `--num-threads <N>` CPU threads for parallel tasks (0=auto‑detect) [env: NUM_THREADS, default: `0`]
-*   `--group-redis` Group Redis records by table name (vs individual keys) [env: GROUP_REDIS, default: `false`]
+See [docs/compatible.md](docs/compatible.md) for the full compatibility matrix of supported vector database versions and import file formats.
 
----
-
-## Pinecone Cloud Support
-
-When `-t pinecone` is selected and `--host` is not a local URL:
-
-1.  **Create / Describe Index**
-    *   Uses the control plane `https://api.pinecone.io/indexes`
-    *   Requires `--indexes`, `--secret` (API key), `--cloud`, and `--region`
-    *   If the index does not exist, it is created with your `--dimension` and `--metric`
-    *   On `409 Conflict`, the existing index is described to retrieve its data‑plane host
-
-2.  **Data‑Plane Upserts**
-    *   Vectors are upserted to `https://<your-index-host>`
-    *   Namespace = source table name (each table is a separate namespace)
-    *   Metadata includes a `"table": "<table_name>"` field
-
-> **Note:** For local Pinecone dev images, index creation via API may not be supported.
-> Ensure your index exists or provide the full data‑plane URL with `--host`.
 
 ---
 
 ## Docker Setup
 
-Run supported vector DBs locally via Docker – see [DOCKER_SETUP.md](DOCKER_SETUP.md) for commands.
+Run supported vector DBs locally via Docker – see [DOCKER_SETUP.md](docs/DOCKER_SETUP.md) for commands.
 
----
-
-## How It Works
-
-1.  **Read & Detect:** Load dump (`.sql`/`.surql`), detect SQL dialect or SurrealDB.
-2.  **Parse (Regex):** Extract records and types.
-3.  **Embed:** Call the selected embedding provider (`ollama`, `rustbert` on CPU, `google`) to get vectors.
-4.  **Auto-Schema:** Automatically create:
-    *   Target database if it doesn't exist
-    *   Collections/indices from table names in the dump
-    *   Proper dimension settings based on your `--dimension` parameter
-    *   Distance metrics using your specified `--metric` value
-5.  **Store:** Insert into your vector DB with metadata.
-
----
-
-## Automatic Collection Creation
-
-For each table in your source data dump, `db2vec` automatically:
-
-*   Creates a corresponding collection/index in the target vector database
-*   Names the collection after the source table name
-*   Configures proper dimensions and metric type based on your CLI arguments
-*   Creates the database first if it doesn't exist
-
-This zero-config schema creation means you don't need to manually set up your vector database structure before import.
-
-> **Note:** When using Redis with `--group-redis`, collections aren't created in the traditional sense. Instead, records are grouped by table name into Redis data structures (e.g., `table:profile` → [records]). Without this flag, Redis stores each record as an individual entry with a table label in the metadata.
->
-> **Warning:** If collections already exist, their dimension must match the `--dimension` parameter you provide. Some databases like Pinecone will reject vectors with mismatched dimensions, causing the import to fail.
 
 ---
 

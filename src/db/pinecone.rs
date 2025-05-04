@@ -18,12 +18,12 @@ impl PineconeDatabase {
         let client = Client::new();
         let api_version = "2025-01".to_string();
         let is_local =
-            args.host.contains("localhost") ||
-            args.host.contains("127.0.0.1") ||
-            args.host.contains("::1");
+            args.vector_host.contains("localhost") ||
+            args.vector_host.contains("127.0.0.1") ||
+            args.vector_host.contains("::1");
 
         let control_plane_url = if is_local {
-            args.host.clone()
+            args.vector_host.clone()
         } else {
             "https://api.pinecone.io".to_string()
         };
@@ -107,14 +107,14 @@ impl PineconeDatabase {
         }
 
         let data_plane_url = if is_local {
-            args.host.clone()
+            args.vector_host.clone()
         } else {
-            if args.host.contains(".svc.") && args.host.contains(".pinecone.io") {
-                info!("Using provided --host as data plane URL: {}", args.host);
-                if args.host.starts_with("https://") {
-                    args.host.clone()
+            if args.vector_host.contains(".svc.") && args.vector_host.contains(".pinecone.io") {
+                info!("Using provided --host as data plane URL: {}", args.vector_host);
+                if args.vector_host.starts_with("https://") {
+                    args.vector_host.clone()
                 } else {
-                    format!("https://{}", args.host)
+                    format!("https://{}", args.vector_host)
                 }
             } else if let Some(host) = parsed_host_from_create {
                 info!("Using host from create/describe API response as data plane URL: {}", host);

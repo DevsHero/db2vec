@@ -8,59 +8,63 @@ use uuid::Uuid;
 use crate::cli::Args;
 use crate::embedding::{
     models::google::GoogleEmbeddingClient,
-    models::ollama::OllamaEmbeddingClient,
-    models::rust_bert::RustBertEmbeddingClient,
+    models::ollama::OllamaEmbeddingClient, 
+    models::tei::TeiEmbeddingClient,
     AsyncEmbeddingGenerator,
 };
 
-fn get_device() -> tch::Device {
-    if tch::Cuda::is_available() {
-        info!("Using CUDA device");
-        tch::Device::Cuda(0)
-    } else {
-        info!("Using CPU device");
-        tch::Device::Cpu
-    }
-}
-
 pub fn initialize_embedding_generator(
-    args: &Args
-) -> Result<Box<dyn AsyncEmbeddingGenerator + Send + Sync>, Box<dyn StdError + Send + Sync>> {
+    args: &Args,
+    override_url: Option<&str>,
+) -> Result<Box<dyn AsyncEmbeddingGenerator + Send + Sync>, Box<dyn StdError + Sync + Send>> {
     let provider = args.embedding_provider.to_lowercase();
     info!("Selected embedding provider: {}", provider);
 
+    let url = override_url
+        .or_else(|| args.embedding_url.as_deref())
+        .map(|s| s.to_string());
+
     match provider.as_str() {
-        "ollama" => {
-            let client = OllamaEmbeddingClient::new(
-                &args.embedding_url,
-                &args.embedding_model,
-                args.dimension
+        "tei" => {
+     
+            let url_to_use = match override_url {
+                Some(url) => url,
+                None => args.embedding_url.as_deref().unwrap_or("http://localhost:8080")
+            };
+            
+            let client = TeiEmbeddingClient::new(
+                url_to_use.to_string(),
+                args.dimension,
+                args.embedding_timeout 
             )?;
             Ok(Box::new(client))
         }
+
+        "ollama" => {
+            let ollama_url = url.unwrap_or_else(|| "http://localhost:11434".into());
+            info!("🟢 Ollama client -> {}", ollama_url);
+            let client = OllamaEmbeddingClient::new(
+                &ollama_url,
+                &args.embedding_model,
+                args.dimension,
+            )?;
+            Ok(Box::new(client))
+        }
+
         "google" => {
             let api_key = args.embedding_api_key
                 .clone()
-                .ok_or_else(|| {
-                    "GOOGLE_API_KEY or --embedding-api-key is required when using the 'google' embedding provider".to_string()
-                })?;
-
+                .ok_or_else(|| "Missing EMBEDDING_API_KEY for Google".to_string())?;
+            info!("🟢 Google client");
             let client = GoogleEmbeddingClient::new(
                 api_key,
                 Some(args.embedding_model.clone()),
-                args.dimension
+                args.dimension,
             )?;
-
-            let client = client.with_task_type(&args.embedding_task_type);
-
             Ok(Box::new(client))
         }
-        "rustbert" => {
-            let device = get_device();
-            let client = RustBertEmbeddingClient::new(&args.embedding_model, device)?;
-            Ok(Box::new(client))
-        }
-        _ => Err(format!("Unsupported embedding provider: {}", provider).into()),
+
+        other => Err(format!("Unsupported embedding provider: {}", other).into()),
     }
 }
 
