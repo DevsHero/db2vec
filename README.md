@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Tired of waiting hours for Python scripts to embed large database exports, especially on machines without powerful GPUs? So was I. Processing millions of records demands performance, even on standard hardware. `db2vec` is a high‑performance Rust tool designed for efficient **CPU-based embedding generation**. It parses your database dumps, generates vector embeddings using local models (Ollama, TEI) or cloud APIs (Google Gemini), and loads them into your vector database of choice – all optimized for speed without requiring a dedicated GPU.
+Tired of waiting hours for Python scripts to embed large database exports, especially on machines without powerful GPUs? So was I. Processing millions of records demands performance, even on standard hardware. `db2vec` is a high‑performance Rust tool designed for efficient **CPU-based embedding generation**. It parses your database dumps, generates vector embeddings using local models (Ollama, text-embeddings-inference(TEI) ) or cloud APIs (Google Gemini), and loads them into your vector database of choice – all optimized for speed without requiring a dedicated GPU.
 
 ![db2vec CLI running](assets/db2vec_screenshot.png)
 
