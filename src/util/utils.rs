@@ -5,9 +5,7 @@ use encoding_rs::UTF_16LE;
 use encoding_rs_io::DecodeReaderBytesBuilder;
 use log::info;
 use crate::parser::detect_format;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use crate::util::spinner::{ start_spinner_animation, AnimationHandle };
+
 
 pub fn read_file_content<P: AsRef<Path>>(file_path: P) -> IoResult<String> {
     info!("Reading file: {}", file_path.as_ref().display());
