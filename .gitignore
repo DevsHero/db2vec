@@ -11,3 +11,4 @@ docker-compose.yml
 /dist
 .DS_Store
 tests/volumes
+tei_failure.log
