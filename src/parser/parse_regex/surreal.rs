@@ -2,10 +2,18 @@ use regex::Regex;
 use log::{ info, warn, debug };
 use serde_json::Value;
 use crate::parser::parse_regex::clean_html_in_value;
+use crate::cli::Args;
+use crate::util::exclude::Excluder;
 
-pub fn parse_surreal(chunk: &str) -> Option<Vec<Value>> {
+pub fn parse_surreal(chunk: &str, args: &Args) -> Option<Vec<Value>> {
     info!("Using parse method: Surreal");
     let mut records = Vec::new();
+
+    let excluder = if args.use_exclude {
+        Some(Excluder::load("config/exclude.json"))
+    } else {
+        None
+    };
 
     let table_header_re = Regex::new(r"--\s*TABLE DATA:\s*([a-zA-Z0-9_]+)").ok()?;
     let insert_re = Regex::new(r"INSERT\s*\[(?s)(.*?)\]\s*;").ok()?;
@@ -42,6 +50,13 @@ pub fn parse_surreal(chunk: &str) -> Option<Vec<Value>> {
                 table_name = t_name.clone();
             } else {
                 break;
+            }
+        }
+
+        if let Some(ref excl) = excluder {
+            if excl.ignore_table(&table_name) {
+                info!("Skipping excluded table: {}", table_name);
+                continue; 
             }
         }
 
@@ -131,6 +146,7 @@ pub fn parse_surreal(chunk: &str) -> Option<Vec<Value>> {
         warn!("No records parsed from section");
         None
     } else {
+   
         info!("Successfully parsed {} records", records.len());
         Some(records)
     }

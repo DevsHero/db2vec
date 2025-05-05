@@ -13,6 +13,7 @@ Tired of waiting hours for Python scripts to embed large database exports, espec
 *   🚀 **Blazing Fast:** Built in Rust for maximum throughput on large datasets, optimized for CPU.
 *   🔄 **Parallel Processing:** Adjustable concurrency and batch‑size for embedding generation (`--num‑threads`, `--embedding‑concurrency`, `--embedding‑batch-size`).
 *   📦 **Batch Inserts:** Configurable batch size (`-c, --chunk-size`) and payload limits (`-m, --max-payload-size-mb`) for efficient bulk loading into the target vector database.
+*   🛡️ **Data Filtering:** Exclude sensitive tables or fields via configuration for data privacy and reduced processing time.
 *   🔧 **Highly Configurable:** Fine-tune performance and behavior with extensive CLI arguments for embedding, database connections, batching, and more.
 *   📄 **Supported Dump Formats:**
     *   `.sql` (MySQL, PostgreSQL, MSSQL, SQLite, Oracle)
@@ -64,14 +65,54 @@ Refer to the `.env-example` file for a comprehensive list of available environme
 
 1.  **Read & Detect:** Load dump (`.sql`/`.surql`), detect SQL dialect or SurrealDB.
 2.  **Parse (Regex):** Extract records and types.
-3.  **Embed:** Call the selected embedding provider (`ollama`, `tei` on CPU, `google`) to get vectors.
-4.  **Auto-Schema:** Automatically create:
+3.  **Apply Exclusions:** Skip tables or fields based on your exclusion rules (if enabled).
+4.  **Embed:** Call the selected embedding provider (`ollama`, `tei` on CPU, `google`) to get vectors.
+5.  **Auto-Schema:** Automatically create:
     *   Target database if it doesn't exist
     *   Collections/indices from table names in the dump
     *   Proper dimension settings based on your `--dimension` parameter
     *   Distance metrics using your specified `--metric` value
-5.  **Store:** Insert into your vector DB with metadata.
+6.  **Store:** Insert into your vector DB with metadata.
 
+---
+
+## Data Exclusion
+
+The exclusion feature allows you to skip entire tables or specific fields within records, which is useful for:
+
+* Protecting sensitive data (passwords, PII)
+* Improving performance by excluding large tables or fields not needed for search
+* Reducing storage costs in your vector database
+
+### How to Use Exclusions
+
+1. Create a `config/exclude.json` file with your exclusion rules
+2. Enable exclusions with the `--use-exclude` flag
+
+### Sample exclude.json
+
+```json
+[
+  {
+    "table": "users",
+    "ignore_table": false,
+    "exclude_fields": {
+      "password": true,
+      "email": true,
+      "profile": ["ssn", "tax_id"]
+    }
+  },
+  {
+    "table": "audit_logs",
+    "ignore_table": true
+  }
+]
+```
+This configuration:
+
+Keeps the "users" table but removes password and email fields
+For the "profile" object field, only removes the "ssn" and "tax_id" subfields
+Completely skips the "audit_logs" table
 ---
 
 ## Automatic Collection Creation

@@ -53,6 +53,11 @@ impl Database for ChromaDatabase {
             return Ok(());
         }
 
+        let normalized_table = table.to_lowercase();
+        if normalized_table != table {
+            info!("Normalizing Chroma collection name '{}' to '{}'", table, normalized_table);
+        }
+
         let dbs_url = format!("{}/tenants/{}/databases", self.url, self.tenant);
         let mut list_dbs_req = self.client.get(&dbs_url);
         if let Some(ref token) = self.auth_token {
@@ -96,7 +101,7 @@ impl Database for ChromaDatabase {
         let mut collection_id: Option<String> = None;
         if let Some(arr) = cols_json.as_array() {
             for col in arr {
-                if col["name"].as_str() == Some(table) {
+                if col["name"].as_str() == Some(&normalized_table) {
                     collection_id = col["id"].as_str().map(|s| s.to_string());
                     break;
                 }
@@ -107,7 +112,7 @@ impl Database for ChromaDatabase {
             None => {
                 let col_body =
                     serde_json::json!({
-                    "name": table,
+                    "name": normalized_table,
                     "dimension": self.dimension,
                     "configuration_json": {
                         "embedding_function": null,
@@ -143,7 +148,7 @@ impl Database for ChromaDatabase {
 
         let ids: Vec<String> = items
             .iter()
-            .map(|(id, _, _)| format!("{}:{}", table, id))
+            .map(|(id, _, _)| format!("{}:{}", normalized_table, id))
             .collect();
         let embeddings: Vec<Vec<f32>> = items
             .iter()
@@ -219,14 +224,15 @@ impl Database for ChromaDatabase {
         debug!("Chroma insert response ({}): {}", status, body_text);
 
         if status.is_success() {
-            info!("Chroma: inserted {} vectors into '{}'", items.len(), table);
+            info!("Chroma: inserted {} vectors into '{}' (original: '{}')", 
+                  items.len(), normalized_table, table);
             Ok(())
         } else if body_text.contains("Error in compaction") {
             warn!("Chroma compaction error during insert (ignored): {}", body_text);
             info!(
                 "Chroma: potentially inserted {} vectors into '{}' despite compaction error",
                 items.len(),
-                table
+                normalized_table
             );
             Ok(())
         } else {

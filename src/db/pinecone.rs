@@ -164,6 +164,11 @@ impl Database for PineconeDatabase {
             return Ok(());
         }
 
+        let normalized_namespace = table.to_lowercase();
+        if normalized_namespace != table {
+            info!("Normalizing Pinecone namespace '{}' to '{}'", table, normalized_namespace);
+        }
+        
         let url = format!("{}/vectors/upsert", self.data_plane_url);
         let vectors: Vec<Value> = items
             .iter()
@@ -216,10 +221,9 @@ impl Database for PineconeDatabase {
             })
             .collect();
 
-        let payload =
-            json!({
+        let payload = json!({
             "vectors": vectors,
-            "namespace": table 
+            "namespace": normalized_namespace  
         });
 
         let mut req = self.client
@@ -244,12 +248,14 @@ impl Database for PineconeDatabase {
                 .get("upsertedCount")
                 .and_then(|c| c.as_u64())
                 .unwrap_or(0);
-            info!("Pinecone: upserted {} vectors into namespace `{}`", count, table);
+            info!("Pinecone: upserted {} vectors into namespace `{}` (original: '{}')", 
+                  count, normalized_namespace, table);
             Ok(())
         } else {
             let status = resp.status();
             let txt = resp.text()?;
-            error!("Pinecone bulk upsert failed for namespace '{}' ({}): {}", table, status, txt);
+            error!("Pinecone bulk upsert failed for namespace '{}' ({}): {}", 
+                   normalized_namespace, status, txt);
             Err(format!("Pinecone bulk upsert error for namespace '{}': {}", table, txt).into())
         }
     }

@@ -233,10 +233,15 @@ impl Database for RedisDatabase {
             return Ok(());
         }
 
+        let normalized_table = table.to_lowercase();
+        if normalized_table != table {
+            info!("Normalizing Redis table/index name '{}' to '{}'", table, normalized_table);
+        }
+
         let mut con = self.get_connection()?;
 
         if self.group_redis {
-            let key = format!("table:{}", table);
+            let key = format!("table:{}", normalized_table);
 
             let docs: Vec<Value> = items
                 .iter()
@@ -272,19 +277,19 @@ impl Database for RedisDatabase {
                     ) as DbError
                 })?;
 
-            info!("Stored {} items grouped for table '{}'", items.len(), table);
+            info!("Stored {} items grouped for table '{}' (original: '{}')", 
+                  items.len(), normalized_table, table);
             return Ok(());
         }
 
         let first_item_data = items.first().map(|(_, _, data)| data);
-        self.ensure_index_exists(&mut con, table, first_item_data)?;
+        self.ensure_index_exists(&mut con, &normalized_table, first_item_data)?;
 
         let mut pipe = redis::pipe();
         pipe.atomic();
 
         for (id, vec, data) in items {
-            let key = format!("item:{}:{}", table, id);
-
+            let key = format!("item:{}:{}", normalized_table, id);
             let mut record_obj = serde_json::Map::new();
             record_obj.insert("vector".to_string(), serde_json::to_value(vec)?);
             record_obj.insert("source_table".to_string(), Value::String(table.to_string()));
@@ -321,8 +326,8 @@ impl Database for RedisDatabase {
                 ) as DbError
             })?;
 
-        info!("Stored {} items for table '{}' in Redis", items.len(), table);
-
+        info!("Stored {} items for table '{}' (original: '{}') in Redis", 
+              items.len(), normalized_table, table);
         Ok(())
     }
 }

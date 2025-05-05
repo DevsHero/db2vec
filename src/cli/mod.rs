@@ -127,4 +127,8 @@ pub struct Args {
     /// Port for the managed TEI server (only used if starting TEI locally)
     #[arg(long, env = "TEI_LOCAL_PORT", default_value_t = 8080)]
     pub tei_local_port: u16,
+
+    /// Apply exclusion rules from config/exclude.json to remove sensitive fields
+    #[arg(long, env = "USE_EXCLUDE", default_value = "false")]
+    pub use_exclude: bool,
 }

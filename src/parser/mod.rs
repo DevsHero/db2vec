@@ -21,6 +21,13 @@ pub fn parse_database_export(
     args: &Args
 ) -> Result<Vec<Value>, Box<dyn std::error::Error>> {
     let mut all_records = Vec::new();
+    
+    let excluder = if args.use_exclude {
+        Some(crate::util::exclude::Excluder::load("config/exclude.json"))
+    } else {
+        None
+    };
+
     let chunks: Vec<String> = match format {
         "mssql" | "postgres" | "mysql" | "surreal" | "sqlite" => {
             info!("Processing {} file without chunking", format);
@@ -50,9 +57,16 @@ pub fn parse_database_export(
             continue;
         }
 
-        match parse_with_regex(&chunk, format) {
-            Some(records) => {
+        match parse_with_regex(&chunk, format, args) {
+            Some(mut records) => {
                 if !records.is_empty() {
+                    if let Some(ref excl) = excluder {
+                        debug!("Filtering fields for {} records from chunk {}", records.len(), i);
+                        for record in &mut records {
+                            excl.filter_record(record);
+                        }
+                    }
+                    
                     info!("Parsed {} records from chunk {}", records.len(), i);
                     if args.debug {
                         for (j, rec) in records.iter().enumerate() {
@@ -158,14 +172,14 @@ pub fn detect_format(file_path: &str, content: &str) -> String {
     "json".to_string()
 }
 
-pub fn parse_with_regex(chunk: &str, format: &str) -> Option<Vec<Value>> {
+pub fn parse_with_regex(chunk: &str, format: &str, args: &Args) -> Option<Vec<Value>> {
     match format {
-        "surreal" => parse_surreal(chunk),
-        "mysql" => parse_mysql(chunk),
-        "postgres" => parse_postgres(chunk),
-        "oracle" => parse_oracle(chunk),
-        "sqlite" => parse_sqlite(chunk),
-        "mssql" => parse_mssql(chunk),
+        "surreal" => parse_surreal(chunk, args),
+        "mysql" => parse_mysql(chunk, args),
+        "postgres" => parse_postgres(chunk, args),
+        "oracle" => parse_oracle(chunk, args),
+        "sqlite" => parse_sqlite(chunk, args),
+        "mssql" => parse_mssql(chunk, args),
         _ => None,
     }
 }

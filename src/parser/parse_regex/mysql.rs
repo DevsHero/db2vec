@@ -1,12 +1,20 @@
 use log::{ info, warn, debug };
 use regex::Regex;
 use serde_json::Value;
-
 use crate::parser::parse_regex::{ clean_html_in_value, parse_array };
+use crate::cli::Args;
+use crate::util::exclude::Excluder;
 
-pub fn parse_mysql(chunk: &str) -> Option<Vec<Value>> {
+pub fn parse_mysql(chunk: &str, args: &Args) -> Option<Vec<Value>> {
     info!("Using parse method: MySQL");
     let mut records = Vec::new();
+    
+    let excluder = if args.use_exclude {
+        Some(Excluder::load("config/exclude.json"))
+    } else {
+        None
+    };
+
     let insert_re = Regex::new(
         r#"(?is)INSERT INTO\s+[`'\"]?(\w+)[`'\"]?\s*(?:\(([^)]+)\))?\s*VALUES\s*(.*?);"#
     ).ok()?;
@@ -15,6 +23,14 @@ pub fn parse_mysql(chunk: &str) -> Option<Vec<Value>> {
 
     for cap in insert_re.captures_iter(chunk) {
         let table = cap.get(1)?.as_str();
+        
+        if let Some(ref excl) = excluder {
+            if excl.ignore_table(table) {
+                info!("Skipping excluded MySQL table: {}", table);
+                continue;
+            }
+        }
+
         let column_names: Vec<String> = if let Some(cols_match) = cap.get(2) {
             cols_match
                 .as_str()

@@ -52,7 +52,8 @@ impl Database for QdrantDatabase {
             return Ok(());
         }
 
-        let coll_url = format!("{}/collections/{}", self.url, table);
+        let normalized_table = table.to_lowercase();
+        let coll_url = format!("{}/collections/{}", self.url, normalized_table);
         let mut chk = self.client.get(&coll_url);
         if let Some(k) = &self.api_key {
             chk = chk.header("api-key", k);
@@ -70,10 +71,8 @@ impl Database for QdrantDatabase {
             };
 
             info!(
-                "Creating Qdrant collection '{}' with dimension {} and distance {}",
-                table,
-                self.dimension,
-                distance
+                "Creating Qdrant collection '{}' (from table '{}') with dimension {} and distance {}",
+                normalized_table, table, self.dimension, distance
             );
             let body =
                 json!({
@@ -89,7 +88,7 @@ impl Database for QdrantDatabase {
             let cr = crt.send()?;
             if !cr.status().is_success() {
                 let err = cr.text()?;
-                return Err(format!("Failed to create collection '{}': {}", table, err).into());
+                warn!("Failed to create collection '{}': {}. Attempting to insert anyway.", normalized_table, err);
             }
         }
 
@@ -111,14 +110,14 @@ impl Database for QdrantDatabase {
             })
             .collect();
 
-        let up_url = format!("{}/collections/{}/points?wait=true", self.url, table);
+        let up_url = format!("{}/collections/{}/points?wait=true", self.url, normalized_table);
         let mut up = self.client.put(&up_url).json(&json!({ "points": points }));
         if let Some(k) = &self.api_key {
             up = up.header("api-key", k);
         }
         let up_res = up.send()?;
         if up_res.status().is_success() {
-            info!("Qdrant: upserted {} points into `{}`", items.len(), table);
+            info!("Qdrant: upserted {} points into `{}`", items.len(), normalized_table);
             Ok(())
         } else {
             let txt = up_res.text()?;

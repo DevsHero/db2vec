@@ -1,12 +1,19 @@
 use log::{ info, warn, debug };
 use regex::Regex;
 use serde_json::Value;
-
 use crate::parser::parse_regex::clean_html_in_value;
+use crate::cli::Args;
+use crate::util::exclude::Excluder;
 
-pub fn parse_oracle(content: &str) -> Option<Vec<Value>> {
+pub fn parse_oracle(content: &str, args: &Args) -> Option<Vec<Value>> {
     info!("Using parse method: Oracle");
     let mut records = Vec::new();
+
+    let excluder = if args.use_exclude {
+        Some(Excluder::load("config/exclude.json"))
+    } else {
+        None
+    };
 
     let insert_re = Regex::new(
         r#"(?is)Insert\s+into\s+([\w\.\"]+)\s+\(([^)]+)\)\s+values\s+\(([^;]+)\);"#
@@ -22,6 +29,13 @@ pub fn parse_oracle(content: &str) -> Option<Vec<Value>> {
                 full_table
             }
         ).trim_matches('"');
+
+        if let Some(ref excl) = excluder {
+            if excl.ignore_table(table) {
+                info!("Skipping excluded Oracle table: {}", table);
+                continue;
+            }
+        }
 
         debug!("Processing Oracle INSERT for table: {}", table);
 

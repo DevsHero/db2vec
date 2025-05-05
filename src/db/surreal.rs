@@ -102,12 +102,6 @@ impl SurrealDatabase {
 
         Ok(())
     }
-}
-
-impl Database for SurrealDatabase {
-    fn connect(_url: &str) -> Result<Self, DbError> where Self: Sized {
-        unimplemented!("Use SurrealDatabase::new(&args) instead");
-    }
 
     fn store_vector(
         &self,
@@ -118,7 +112,12 @@ impl Database for SurrealDatabase {
             return Ok(());
         }
 
-        self.ensure_table_exists(table)?;
+        let normalized_table = table.to_lowercase();
+        if normalized_table != table {
+            info!("Normalizing SurrealDB table name '{}' to '{}'", table, normalized_table);
+        }
+
+        self.ensure_table_exists(&normalized_table)?;
 
         let records: Vec<(String, Value)> = items
             .iter()
@@ -129,6 +128,7 @@ impl Database for SurrealDatabase {
                         "vector".to_string(),
                         serde_json::to_value(vector).unwrap_or_default()
                     );
+                    obj.insert("original_table".to_string(), Value::String(table.to_string()));
                 }
                 (id.clone(), record)
             })
@@ -138,7 +138,7 @@ impl Database for SurrealDatabase {
         let mut import_data = String::new();
 
         for (id, data) in &records {
-            let record_id = format!("{}:`{}`", table, id);
+            let record_id = format!("{}:`{}`", normalized_table, id);
             let content_json = serde_json::to_string(&data)?;
             import_data.push_str(&format!("CREATE {} CONTENT {};\n", record_id, content_json));
         }
@@ -172,7 +172,88 @@ impl Database for SurrealDatabase {
             return Err(format!("SurrealDB batch import failed ({}): {}", status, text).into());
         }
 
-        info!("SurrealDB: successfully imported {} records to {}", records.len(), table);
+        info!("SurrealDB: successfully imported {} records to {} (original: {})", 
+              records.len(), normalized_table, table);
+        Ok(())
+    }
+}
+
+impl Database for SurrealDatabase {
+    fn connect(_url: &str) -> Result<Self, DbError> where Self: Sized {
+        unimplemented!("Use SurrealDatabase::new(&args) instead");
+    }
+
+    fn store_vector(
+        &self,
+        table: &str,
+        items: &[(String, Vec<f32>, Value)]
+    ) -> Result<(), DbError> {
+        if items.is_empty() {
+            return Ok(());
+        }
+
+        let normalized_table = table.to_lowercase();
+        if normalized_table != table {
+            info!("Normalizing SurrealDB table name '{}' to '{}'", table, normalized_table);
+        }
+
+        self.ensure_table_exists(&normalized_table)?;
+
+        let records: Vec<(String, Value)> = items
+            .iter()
+            .map(|(id, vector, meta)| {
+                let mut record = meta.clone();
+                if let Some(obj) = record.as_object_mut() {
+                    obj.insert(
+                        "vector".to_string(),
+                        serde_json::to_value(vector).unwrap_or_default()
+                    );
+                    obj.insert("original_table".to_string(), Value::String(table.to_string()));
+                }
+                (id.clone(), record)
+            })
+            .collect();
+
+        let import_url = format!("{}/import", self.url.trim_end_matches('/'));
+        let mut import_data = String::new();
+
+        for (id, data) in &records {
+            let record_id = format!("{}:`{}`", normalized_table, id);
+            let content_json = serde_json::to_string(&data)?;
+            import_data.push_str(&format!("CREATE {} CONTENT {};\n", record_id, content_json));
+        }
+
+        info!("SurrealDB Import URL: {}", import_url);
+        let preview_len = import_data.chars().count().min(300);
+        info!(
+            "SurrealDB Import Payload Preview: {}...",
+            import_data.chars().take(preview_len).collect::<String>()
+        );
+
+        let mut req = self.client
+            .post(&import_url)
+            .header("Surreal-NS", &self.ns)
+            .header("Surreal-DB", &self.db)
+            .header("Content-Type", "text/plain")
+            .header("Accept", "application/json")
+            .body(import_data);
+
+        if let Some(ref auth) = self.auth_header {
+            req = req.header("Authorization", auth);
+        }
+
+        let resp = req.send()?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_else(|e| format!("Failed to read response body: {}", e));
+        info!("SurrealDB Import Response Status: {}", status);
+        info!("SurrealDB Import Response Body: {}", text);
+
+        if !status.is_success() {
+            return Err(format!("SurrealDB batch import failed ({}): {}", status, text).into());
+        }
+
+        info!("SurrealDB: successfully imported {} records to {} (original: {})", 
+              records.len(), normalized_table, table);
         Ok(())
     }
 }

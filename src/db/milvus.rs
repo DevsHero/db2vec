@@ -125,6 +125,11 @@ impl Database for MilvusDatabase {
         if items.is_empty() {
             return Ok(());
         }
+        
+        let normalized_collection = table.to_lowercase();
+        if normalized_collection != table {
+            info!("Normalizing Milvus collection name '{}' to '{}'", table, normalized_collection);
+        }
 
         let list_db_url = format!("{}/v2/vectordb/databases/list", self.url);
         let list_db_req = self.client.post(&list_db_url).json(&json!({}));
@@ -153,7 +158,7 @@ impl Database for MilvusDatabase {
         let stats_payload =
             json!({
             "dbName": self.db_name,
-            "collectionName": table
+            "collectionName": normalized_collection
         });
         let stats_req = self.client.post(&stats_url).json(&stats_payload);
 
@@ -202,7 +207,7 @@ impl Database for MilvusDatabase {
                     .unwrap_or("Unknown error checking collection stats");
                 error!(
                     "Failed to check stats for collection '{}' in db '{}': Code {} - {}",
-                    table,
+                    normalized_collection,
                     self.db_name,
                     code,
                     message
@@ -210,7 +215,7 @@ impl Database for MilvusDatabase {
                 return Err(
                     format!(
                         "Failed to check stats for collection '{}' in db '{}': Code {} - {}",
-                        table,
+                        normalized_collection,
                         self.db_name,
                         code,
                         message
@@ -218,13 +223,13 @@ impl Database for MilvusDatabase {
                 );
             }
 
-            info!("Collection '{}' not found in database '{}'. Creating...", table, self.db_name);
+            info!("Collection '{}' not found in database '{}'. Creating...", normalized_collection, self.db_name);
             let create_coll_url = format!("{}/v2/vectordb/collections/create", self.url);
 
             let create_coll_payload =
                 json!({
                 "dbName": self.db_name,
-                "collectionName": table,
+                "collectionName": normalized_collection,
                 "schema": {
                     "autoId": false,
                     "enableDynamicField": true,
@@ -258,11 +263,11 @@ impl Database for MilvusDatabase {
             self.send_request(self.add_auth(create_coll_req), "create collection")?;
             info!(
                 "Milvus collection '{}' created successfully in database '{}'.",
-                table,
+                normalized_collection,
                 self.db_name
             );
         } else {
-            info!("Milvus collection '{}' already exists in database '{}'.", table, self.db_name);
+            info!("Milvus collection '{}' already exists in database '{}'.", normalized_collection, self.db_name);
         }
 
         let data: Vec<Value> = items
@@ -274,7 +279,7 @@ impl Database for MilvusDatabase {
                     warn!(
                         "ID='{}' in collection '{}': vector length {} ≠ {}, filling with zeros",
                         id,
-                        table,
+                        normalized_collection,
                         vec.len(),
                         self.dimension
                     );
@@ -310,15 +315,16 @@ impl Database for MilvusDatabase {
         let insert_payload =
             json!({
             "dbName": self.db_name,
-            "collectionName": table,
+            "collectionName": normalized_collection,
             "data": data
         });
 
         let insert_req = self.client.post(&insert_url).json(&insert_payload);
         self.send_request(self.add_auth(insert_req), "insert entities")?;
         info!(
-            "Milvus: inserted {} entities into collection '{}' in database '{}'.",
+            "Milvus: inserted {} entities into collection '{}' (original: '{}') in database '{}'.",
             items.len(),
+            normalized_collection,
             table,
             self.db_name
         );

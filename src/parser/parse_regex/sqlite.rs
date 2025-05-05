@@ -1,12 +1,20 @@
 use log::{ info, warn, debug };
 use regex::Regex;
 use serde_json::Value;
-
 use crate::parser::parse_regex::clean_html_in_value;
+use crate::cli::Args;
+use crate::util::exclude::Excluder;
 
-pub fn parse_sqlite(chunk: &str) -> Option<Vec<Value>> {
+pub fn parse_sqlite(chunk: &str, args: &Args) -> Option<Vec<Value>> {
     info!("Using parse method: SQLite");
     let mut records = Vec::new();
+    
+    let excluder = if args.use_exclude {
+        Some(Excluder::load("config/exclude.json"))
+    } else {
+        None
+    };
+
     let create_re = Regex::new(
         r"(?is)CREATE TABLE\s+(?:IF NOT EXISTS\s+)?(?:`?(\w+)`?|(\w+))\s*\((.*?)\);"
     ).ok()?;
@@ -68,6 +76,13 @@ pub fn parse_sqlite(chunk: &str) -> Option<Vec<Value>> {
 
         if table == "sqlite_sequence" {
             continue;
+        }
+        
+        if let Some(ref excl) = excluder {
+            if excl.ignore_table(table) {
+                info!("Skipping excluded SQLite table: {}", table);
+                continue;
+            }
         }
 
         let columns = match table_columns.get(table) {

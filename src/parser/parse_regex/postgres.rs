@@ -1,18 +1,34 @@
 use log::{ info, warn, debug };
 use regex::Regex;
 use serde_json::Value;
-
 use crate::parser::parse_regex::{ clean_html_in_value, parse_array };
+use crate::cli::Args;
+use crate::util::exclude::Excluder;
 
-pub fn parse_postgres(content: &str) -> Option<Vec<Value>> {
+pub fn parse_postgres(content: &str, args: &Args) -> Option<Vec<Value>> {
     info!("Using parse method: Postgres");
     let mut records = Vec::new();
+    
+    let excluder = if args.use_exclude {
+        Some(Excluder::load("config/exclude.json"))
+    } else {
+        None
+    };
+    
     let copy_re = Regex::new(
         r"COPY\s+public\.([a-zA-Z0-9_]+)\s*\(([^)]+)\)\s+FROM stdin;\n((?s:.*?))\n\\\."
     ).ok()?;
 
     for cap in copy_re.captures_iter(content) {
         let table = cap.get(1)?.as_str();
+        
+        if let Some(ref excl) = excluder {
+            if excl.ignore_table(table) {
+                info!("Skipping excluded Postgres table: {}", table);
+                continue;
+            }
+        }
+        
         let columns: Vec<&str> = cap
             .get(2)?
             .as_str()
