@@ -23,7 +23,7 @@ pub trait Database: Send + Sync {
 }
 
 pub fn select_database(args: &Args) -> Result<Box<dyn Database>, DbError> {
-    let database: Box<dyn Database> = match args.db_export_type.as_str() {
+    let database: Box<dyn Database> = match args.vector_export_type.as_str() {
         "redis" => Box::new(RedisDatabase::new(args)?),
         "qdrant" => Box::new(QdrantDatabase::new(args)?),
         "chroma" => Box::new(ChromaDatabase::new(args)?),

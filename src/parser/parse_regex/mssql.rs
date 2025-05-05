@@ -1,4 +1,4 @@
-use log::{ debug, info, warn };
+use log::{ debug, info };
 use regex::Regex;
 use serde_json::Value;
 use crate::parser::parse_regex::clean_html_in_value;
@@ -115,12 +115,6 @@ pub fn parse_mssql(chunk: &str, args: &Args) -> Option<Vec<Value>> {
             };
 
             if fields.len() != col_names.len() {
-                warn!(
-                    "Column count mismatch for table '{}': {} columns vs {} values",
-                    table,
-                    col_names.len(),
-                    fields.len()
-                );
                 continue;
             }
 

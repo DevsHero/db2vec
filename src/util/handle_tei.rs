@@ -75,7 +75,7 @@ pub fn start_and_wait_for_tei(
 
     let mut command = Command::new(tei_binary);
     command
-        .args(["--model-id", model_id,   "--auto-truncate"])
+        .args(["--model-id", model_id,  "--port", &args.tei_local_port.to_string(),  "--auto-truncate"])
         .env("RUST_LOG", "info") 
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

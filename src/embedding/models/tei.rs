@@ -17,25 +17,26 @@ type TeiResponse = Vec<Vec<f32>>;
 
 pub struct TeiEmbeddingClient {
     client: Client,
-    binary_path: String,
+    api_url: String,  
     dimension: usize,
 }
 
 impl TeiEmbeddingClient {
     pub fn new(
-        binary_path: String,
+        api_url: String, 
         dimension: usize, 
         timeout_secs: u64
     ) -> Result<Self, Box<dyn StdError + Send + Sync>> {
-        let mut corrected_url = binary_path;
-        if !corrected_url.ends_with("/embed") {
-            warn!("TEI server URL '{}' does not end with /embed. Appending it.", corrected_url);
-            corrected_url = format!("{}/embed", corrected_url.trim_end_matches('/'));
-        }
-
+        let api_endpoint = if !api_url.ends_with("/embed") {
+            format!("{}/embed", api_url.trim_end_matches('/'))
+        } else {
+            api_url
+        };
+        
+        warn!("TEI server URL: {}", api_endpoint); 
         Ok(Self {
             client: Client::builder().timeout(Duration::from_secs(timeout_secs)).build()?,
-            binary_path: corrected_url,
+            api_url: api_endpoint, 
             dimension,
         })
     }
@@ -54,7 +55,7 @@ impl AsyncEmbeddingGenerator for TeiEmbeddingClient {
         info!(
             "TEI Client: Generating embeddings for {} texts via {}",
             texts.len(),
-            self.binary_path
+            self.api_url
         );
 
         let request_payload = TeiRequest {
@@ -62,61 +63,73 @@ impl AsyncEmbeddingGenerator for TeiEmbeddingClient {
             truncate: None, 
         };
 
-        let response = self.client.post(&self.binary_path).json(&request_payload).send().await;
-
-        match response {
-            Ok(res) => {
-                if res.status().is_success() {
-                    let embeddings = res.json::<TeiResponse>().await?;
-                    if embeddings.len() != texts.len() {
-                        error!(
-                            "TEI Client: Mismatch in response length. Expected {}, got {}.",
-                            texts.len(),
-                            embeddings.len()
-                        );
-                        return Err(
-                            format!(
-                                "TEI response length mismatch: expected {}, got {}",
+    
+        let mut retries = 3;
+        let mut last_error = None;
+        
+        while retries > 0 {
+            match self.client.post(&self.api_url).json(&request_payload).send().await {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        let embeddings = response.json::<TeiResponse>().await?;
+                        if embeddings.len() != texts.len() {
+                            error!(
+                                "TEI Client: Mismatch in response length. Expected {}, got {}.",
                                 texts.len(),
                                 embeddings.len()
-                            ).into()
-                        );
-                    }
-                     for emb in &embeddings {
-                        if emb.len() != self.dimension {
-                            error!(
-                                "TEI Client: Mismatch in embedding dimension. Expected {}, got {}.",
-                                self.dimension,
-                                emb.len()
                             );
                             return Err(
                                 format!(
-                                    "TEI dimension mismatch: expected {}, got {}",
-                                    self.dimension,
-                                    emb.len()
+                                    "TEI response length mismatch: expected {}, got {}",
+                                    texts.len(),
+                                    embeddings.len()
                                 ).into()
                             );
                         }
+                        for emb in &embeddings {
+                            if emb.len() != self.dimension {
+                                error!(
+                                    "TEI Client: Mismatch in embedding dimension. Expected {}, got {}.",
+                                    self.dimension,
+                                    emb.len()
+                                );
+                                return Err(
+                                    format!(
+                                        "TEI dimension mismatch: expected {}, got {}",
+                                        self.dimension,
+                                        emb.len()
+                                    ).into()
+                                );
+                            }
+                        }
+                        info!("TEI Client: Successfully generated {} embeddings", embeddings.len());
+                        return Ok(embeddings);
+                    } else {
+                        let status = response.status();
+                        let error_text = response
+                            .text().await
+                            .unwrap_or_else(|_| "Failed to read error body".to_string());
+                        error!("TEI server returned error {}: {}", status, error_text);
+                        return Err(format!("TEI server error {}: {}", status, error_text).into());
                     }
-                    info!("TEI Client: Successfully generated {} embeddings", embeddings.len());
-                    Ok(embeddings)
-                } else {
-                    let status = res.status();
-                    let error_text = res
-                        .text().await
-                        .unwrap_or_else(|_| "Failed to read error body".to_string());
-                    error!("TEI server returned error {}: {}", status, error_text);
-                    Err(format!("TEI server error {}: {}", status, error_text).into())
+                },
+                Err(e) => {
+                    warn!("TEI request failed (retries left: {}): {}", retries - 1, e);
+                    retries -= 1;
+                    last_error = Some(e);
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    continue;
                 }
             }
-            Err(e) => {
-                error!("Failed to send request to TEI server: {}", e);
-                Err(Box::new(e))
-            }
         }
+
+        Err(Box::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("Failed after multiple retries: {}", last_error.unwrap())
+        )))
     }
 
     fn get_dimension(&self) -> usize {
-     self.dimension
+        self.dimension
     }
 }

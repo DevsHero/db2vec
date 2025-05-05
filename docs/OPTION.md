@@ -5,8 +5,8 @@ Below is the full list of CLI flags, their environment-variable equivalents, def
 
 | Flag / Env Var                                      | Default                  | Description                                                                                   |
 |-----------------------------------------------------|--------------------------|-----------------------------------------------------------------------------------------------|
-| -f, --data-file <FILE> <br> FILE_PATH               | `./surreal.surql`        | Path to the `.sql` / `.surql` database-dump file.                                             |
-| -t, --db-export-type <TYPE> <br> TYPE               | `redis`                  | Target vector database: `redis` \| `chroma` \| `milvus` \| `qdrant` \| `surreal` \| `pinecone`.|
+| -f, --data-file <FILE> <br> DUMP_FILE               | `./surreal.surql`        | Path to the `.sql` / `.surql` database-dump file.                                             |
+| -t, --vector-export-type <EXPORT_TYPE> <br> EXPORT_TYPE               | `redis`                  | Target vector database: `redis` \| `chroma` \| `milvus` \| `qdrant` \| `surreal` \| `pinecone`.|
 | -u, --user <USER> <br> USER                         | `root`                   | Username for DB authentication (Milvus, SurrealDB).                                           |
 | -p, --pass <PASS> <br> PASS                         | `""`                     | Password for DB authentication (Milvus, SurrealDB, Redis).                                    |
 | -k, --secret <SECRET> <br> SECRET                   | `""`                     | API key / token for DB auth (Chroma, Qdrant, Pinecone).                                       |
@@ -31,7 +31,7 @@ Below is the full list of CLI flags, their environment-variable equivalents, def
 | --embedding-batch-size <N> <br> EMBEDDING_BATCH_SIZE | `16`                     | Number of texts per embedding batch.                                                          |
 | --embedding-max-tokens <N> <br> EMBEDDING_MAX_TOKENS | `8000`                   | Max tokens per embedding request (provider-specific).                                         |
 | --embedding-timeout <SEC> <br> OLLAMA_TIMEOUT       | `60`                     | Timeout (seconds) for embedding calls.                                                        |
-| --embedding-task-type <TYPE> <br> EMBEDDING_TASK_TYPE | `SEMANTIC_SIMILARITY` | Optional task type for Google Gemini API.                                                     |
+| --embedding-task-EXPORT_TYPE <EXPORT_TYPE> <br> EMBEDDING_TASK_EXPORT_TYPE | `SEMANTIC_SIMILARITY` | Optional task EXPORT_TYPE for Google Gemini API.                                                     |
 | --num-threads <N> <br> NUM_THREADS                  | `0`                      | CPU threads for parallel tasks (0 = auto-detect).                                             |
 | --group-redis <BOOL> <br> GROUP_REDIS               | `false`                  | Group Redis records by table name (vs individual FT.CREATE/SEARCH).                           |
 | --tei-binary-path <PATH> <br> TEI_BINARY_PATH       | `tei/tei-metal`          | Path to TEI binary (`tei-metal` or `tei-onnx`). If omitted, the embedded TEI is auto-extracted.| 

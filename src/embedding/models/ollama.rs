@@ -60,22 +60,29 @@ impl OllamaEmbeddingClient {
                 .iter()
                 .filter_map(|v| v.as_f64().map(|f| f as f32))
                 .collect();
-            if embedding.len() != self.dimension {
+
+            if embedding.is_empty() && self.dimension > 0 {
+                warn!(
+                    "Ollama returned empty embedding for input '{}', expected dimension {}. Returning zero vector.",
+                    text, self.dimension
+                );
+                Ok(vec![0.0; self.dimension])
+            } else if embedding.len() != self.dimension {
                 warn!(
                     "Ollama returned embedding with dimension {}, expected {}",
                     embedding.len(),
                     self.dimension
                 );
-
-                return Err(
+                Err(
                     format!(
                         "Dimension mismatch: expected {}, got {}",
                         self.dimension,
                         embedding.len()
                     ).into()
-                );
+                )
+            } else {
+                Ok(embedding)
             }
-            Ok(embedding)
         } else {
             Err("Unexpected response structure from Ollama API".into())
         }
@@ -102,19 +109,13 @@ impl AsyncEmbeddingGenerator for OllamaEmbeddingClient {
             Ok(resp) if resp.status().is_success() => {
                 match resp.json::<Value>().await {
                     Ok(parsed) => {
-                        if
-                            let Some(embeddings) = parsed
-                                .get("embeddings")
-                                .and_then(|e| e.as_array())
-                        {
+                        info!("Ollama batch response structure: {:?}", parsed);
+
+                        if let Some(embeddings) = parsed.get("embeddings").and_then(|e| e.as_array()) {
                             let mut result = Vec::with_capacity(embeddings.len());
                             let mut success_count = 0;
                             for (i, emb_val) in embeddings.iter().enumerate() {
-                                if
-                                    let Some(vector) = emb_val
-                                        .get("embedding")
-                                        .and_then(|v| v.as_array())
-                                {
+                                if let Some(vector) = emb_val.get("embedding").and_then(|v| v.as_array()) {
                                     let embedding: Vec<f32> = vector
                                         .iter()
                                         .filter_map(|v| v.as_f64().map(|f| f as f32))
@@ -151,6 +152,71 @@ impl AsyncEmbeddingGenerator for OllamaEmbeddingClient {
                                     texts.len(),
                                     result.len()
                                 );
+                            }
+                        } 
+
+                        else if parsed.is_array() {
+                            let array = parsed.as_array().unwrap();
+                            let mut result = Vec::with_capacity(array.len());
+                            let mut success_count = 0;
+                            for (i, emb_val) in array.iter().enumerate() {
+                                if let Some(vector) = emb_val.as_array() {
+                                    let embedding: Vec<f32> = vector
+                                        .iter()
+                                        .filter_map(|v| v.as_f64().map(|f| f as f32))
+                                        .collect();
+
+                                    if embedding.len() == self.dimension {
+                                        result.push(embedding);
+                                        success_count += 1;
+                                    } else {
+                                        warn!(
+                                            "Ollama batch item {} dimension mismatch: expected {}, got {}",
+                                            i,
+                                            self.dimension,
+                                            embedding.len()
+                                        );
+                                        result.push(vec![0.0; self.dimension]);
+                                    }
+                                } else {
+                                    warn!("Ollama batch item {} missing 'embedding' array", i);
+                                    result.push(vec![0.0; self.dimension]);
+                                }
+                            }
+
+                            if result.len() == texts.len() {
+                                info!(
+                                    "Ollama: Successfully processed batch of {} embeddings ({} succeeded)",
+                                    result.len(),
+                                    success_count
+                                );
+                                return Ok(result);
+                            } else {
+                                warn!(
+                                    "Ollama batch result count mismatch: expected {}, got {}",
+                                    texts.len(),
+                                    result.len()
+                                );
+                            }
+                        } 
+                        else if let Some(embedding) = parsed.get("embedding") {
+                            if let Some(vector) = embedding.as_array() {
+                                let embedding: Vec<f32> = vector
+                                    .iter()
+                                    .filter_map(|v| v.as_f64().map(|f| f as f32))
+                                    .collect();
+
+                                if embedding.len() == self.dimension {
+                                    return Ok(vec![embedding]);
+                                } else {
+                                    warn!(
+                                        "Ollama single embedding dimension mismatch: expected {}, got {}",
+                                        self.dimension,
+                                        embedding.len()
+                                    );
+                                }
+                            } else {
+                                warn!("Ollama single embedding missing 'embedding' array");
                             }
                         } else {
                             warn!("Ollama batch response missing 'embeddings' array");

@@ -79,7 +79,7 @@ pub fn parse_database_export(
                 }
             }
             None => {
-                warn!("Regex parsing failed entirely for chunk {}", i);
+           
                 if args.debug && chunk.len() < 1000 {
                     debug!("Content of failed chunk {}:\n{}", i, chunk);
                 } else if args.debug {

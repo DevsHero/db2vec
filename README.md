@@ -220,6 +220,39 @@ Primarily developed and tested against Docker‑hosted or cloud vector databases
 
 ---
 
+## Testing
+
+### Integration Tests
+
+db2vec includes comprehensive integration tests that verify functionality across all supported database types and embedding providers.
+
+#### Prerequisites
+
+- **Docker**: Required to run containerized instances of all supported vector databases
+- **Embedding Provider**: At least one of the supported embedding providers (Ollama/TEI/Google)
+
+#### Running Integration Tests
+
+The integration test suite will:
+
+1. Spin up Docker containers for each supported vector database
+2. Test all database import formats (MySQL, PostgreSQL, MSSQL, SQLite, Oracle, SurrealDB)
+3. Generate embeddings using the specified provider
+4. Verify proper storage and retrieval from each vector database
+
+```bash
+# Test with Ollama (fastest, requires Ollama running locally)
+EMBEDDING_PROVIDER=ollama cargo test --test integration_test -- --nocapture
+
+# Test with TEI (CPU-based, no external dependencies)
+EMBEDDING_PROVIDER=tei cargo test --test integration_test -- --nocapture
+
+# Test with mock embeddings (no external provider required)
+EMBEDDING_PROVIDER=mock cargo test --test integration_test -- --nocapture
+```
+
+---
+
 ## Contributing
 
 Issues, PRs, and feedback welcome!

@@ -4,12 +4,12 @@ use clap::Parser;
 #[command(author, version, about, long_about = None)]
 pub struct Args {
     /// Path to the .sql/.surql database dump file to process
-    #[arg(short = 'f', env = "FILE_PATH", long, default_value = "./surreal.surql")]
-    pub data_file: String,
+    #[arg(short = 'f', env = "DUMP_FILE", long, default_value = "./surreal.surql")]
+    pub dump_file: String,
 
     /// Target vector database: redis|chroma|milvus|qdrant|surreal|pinecone
-    #[arg(short = 't', env = "TYPE", long, default_value = "redis")]
-    pub db_export_type: String,
+    #[arg(short = 't', env = "EXPORT_TYPE", long, default_value = "redis")]
+    pub vector_export_type: String,
 
     /// Username for database authentication (Milvus, SurrealDB)
     #[arg(short = 'u', env = "USER", long, default_value = "root")]

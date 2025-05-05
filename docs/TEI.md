@@ -33,9 +33,8 @@ text-embeddings-router --model-id YOUR_MODEL_ID --port 8080
 
 ---
 
-## Using TEI with db2vec
-
-When running `db2vec`, point it at one of the shipped binaries (or your own):
+## Using local TEI with db2vec
+ 
 
 ```bash
 cargo run --release -- \
@@ -45,15 +44,8 @@ cargo run --release -- \
   --tei-binary-path tei/tei-metal \
   --embedding-model nomic-ai/nomic-embed-text-v2-moe \
   --dimension 768
-```
+  ```
+  
+--tei-binary-path : path to tei-metal or tei-onnx
+Leave --embedding-url empty to start a local server
 
-- `--tei-binary-path` : path to `tei-metal` or `tei-onnx`  
-- `--embedding-provider=tei` : select the TEI backend  
-- `--embedding-model` : any HF model ID (e.g. `BAAI/bge-large-en-v1.5`)  
-- `--dimension` : vector dimension (must match the model)
-
-If you omit `--tei-binary-path`, db2vec will unpack its embedded copy (same binaries) into your temp directory and launch that automatically.
-
----
-
-Happy vectorizing!  

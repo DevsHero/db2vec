@@ -26,14 +26,18 @@ pub fn initialize_embedding_generator(
 
     match provider.as_str() {
         "tei" => {
-     
+            let port = args.tei_local_port;
             let url_to_use = match override_url {
-                Some(url) => url,
-                None => args.embedding_url.as_deref().unwrap_or("http://localhost:8080")
+                Some(url) => url.to_string(),
+                None => args.embedding_url.as_deref()
+                    .unwrap_or(&format!("http://localhost:{}", port))
+                    .to_string()
             };
             
+            info!("🟢 TEI client connecting to {}", url_to_use);
+            
             let client = TeiEmbeddingClient::new(
-                url_to_use.to_string(),
+                url_to_use,
                 args.dimension,
                 args.embedding_timeout 
             )?;

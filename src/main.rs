@@ -1,25 +1,22 @@
-pub mod db;
-pub mod parser;
-pub mod embedding;
-pub mod cli;
-pub mod util;
-pub mod workflow;
+
+use db2vec::util;
+
 use clap::Parser;
-use cli::Args;
-use db::select_database;
+use db2vec::cli::Args;
+use db2vec::db::select_database;
 use dotenvy::dotenv;
 
 use log::{ info, error };
-use crate::util::{ read_file_and_detect_format, logo };
-use parser::parse_database_export;
-use workflow::execute_migration_workflow;
+use db2vec::util::{ read_file_and_detect_format, logo };
+use db2vec::parser::parse_database_export;
+use db2vec::workflow::execute_migration_workflow;
 
-fn main() -> Result<(), db::DbError> {
+fn main() -> Result<(), db2vec::db::DbError> {
     logo();
     dotenv().ok();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("off")).init();
     let args = Args::parse();
-    let file_path = args.data_file.clone();
+    let file_path = args.dump_file.clone();
     util::init_thread_pool(args.num_threads);
 
     let (content, format) = match read_file_and_detect_format(&file_path) {
