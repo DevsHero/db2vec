@@ -1,23 +1,15 @@
 [
     {
-      "table": "experience",
+      "table": "users",
       "ignore_table": false,
       "exclude_fields": {
-        "describe": true,
-        "describe_pdf_data": true
+        "password": true,
+        "email": true,
+        "profile": ["ssn", "tax_id"]
       }
     },
-    
     {
-      "table": "portfolio",
+      "table": "audit_logs",
       "ignore_table": true
-     
-    },
-    {
-      "table": "profile",
-      "ignore_table": false,
-      "exclude_fields": {
-        "pdf": ["about_pdf_data", "avatar_pdf_url"]
-      }
     }
   ]
