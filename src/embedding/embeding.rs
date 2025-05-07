@@ -1,4 +1,4 @@
-use log::{ error, info };
+use log::{ error, info, warn };
 use serde_json::Value;
 use std::error::Error as StdError;
 use std::sync::atomic::{ AtomicUsize, Ordering };
@@ -81,8 +81,8 @@ pub fn process_records_with_embeddings(
     let chunk_size = args.embedding_batch_size;
     let total_records = records.len();
     let mut prepared_records = Vec::with_capacity(total_records);
-
     let rt = Runtime::new()?;
+    let approx_char_limit_from_tokens = args.embedding_max_tokens * 3;
 
     for (chunk_idx, chunk) in records.chunks(chunk_size).enumerate() {
         info!(
@@ -94,7 +94,7 @@ pub fn process_records_with_embeddings(
         let texts: Vec<String> = chunk
             .iter()
             .map(|record| {
-                record
+                let mut full_text = record 
                     .as_object()
                     .map(|obj| {
                         obj.iter()
@@ -103,7 +103,18 @@ pub fn process_records_with_embeddings(
                             .collect::<Vec<_>>()
                             .join(", ")
                     })
-                    .unwrap_or_else(|| record.to_string())
+                    .unwrap_or_else(|| record.to_string());
+
+                if full_text.chars().count() > approx_char_limit_from_tokens {
+                    warn!(
+                        "Client-side truncation: Input text for a record ({} chars) exceeds approximate limit derived from embedding_max_tokens ({} tokens -> ~{} chars). Truncating. Provider might also truncate based on its own limits.",
+                        full_text.chars().count(),
+                        args.embedding_max_tokens,
+                        approx_char_limit_from_tokens
+                    );
+                    full_text = full_text.chars().take(approx_char_limit_from_tokens).collect::<String>();
+                }
+                full_text
             })
             .collect();
 

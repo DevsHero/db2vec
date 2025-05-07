@@ -100,7 +100,7 @@ pub struct Args {
     pub embedding_batch_size: usize,
 
     /// Max tokens per embedding request (provider-specific)
-    #[arg(long, env = "EMBEDDING_MAX_TOKENS", default_value = "8000")]
+    #[arg(long, env = "EMBEDDING_MAX_TOKENS", default_value = "8192")]
     pub embedding_max_tokens: usize,
 
     /// Timeout (seconds) for embedding calls

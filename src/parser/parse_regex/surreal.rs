@@ -90,7 +90,7 @@ pub fn parse_surreal(chunk: &str, args: &Args) -> Option<Vec<Value>> {
 
             let mut record = serde_json::Map::new();
             let kv_regex = Regex::new(
-                r#"([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*('[^']*'|\[.*?\]|\{.*?\}|[0-9.]+(?:f)?|true|false|null)"#
+                r#"([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*("(?:\\.|[^"\\])*"|'[^']*'|\[.*?\]|\{.*?\}|[0-9.]+(?:f)?|true|false|null)"#
             ).unwrap();
 
             for caps in kv_regex.captures_iter(&item_str) {
@@ -107,6 +107,19 @@ pub fn parse_surreal(chunk: &str, args: &Args) -> Option<Vec<Value>> {
                         .unwrap_or(Value::String(raw_val.to_string()))
                 } else if raw_val.starts_with('\'') && raw_val.ends_with('\'') {
                     Value::String(raw_val.trim_matches('\'').to_string())
+                } else if raw_val.starts_with('"') && raw_val.ends_with('"') {
+                    match serde_json::from_str::<String>(raw_val) {
+                        Ok(s) => Value::String(s),
+                        Err(_) => {
+                            let s = raw_val[1..raw_val.len()-1]
+                                .replace("\\\"", "\"")
+                                .replace("\\\\", "\\")
+                                .replace("\\n", "\n")
+                                .replace("\\r", "\r")
+                                .replace("\\t", "\t");
+                            Value::String(s)
+                        }
+                    }
                 } else if let Ok(n) = raw_val.trim_end_matches('f').parse::<f64>() {
                     if n.fract() == 0.0 {
                         Value::Number((n as i64).into())
