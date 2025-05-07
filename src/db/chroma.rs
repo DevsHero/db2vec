@@ -40,9 +40,7 @@ impl ChromaDatabase {
 }
 
 impl Database for ChromaDatabase {
-    fn connect(_url: &str) -> Result<Self, DbError> where Self: Sized {
-        unimplemented!("Use ChromaDatabase::new(&args) instead");
-    }
+    
 
     fn store_vector(
         &self,

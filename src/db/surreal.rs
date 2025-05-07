@@ -106,10 +106,7 @@ impl SurrealDatabase {
   }
 
 impl Database for SurrealDatabase {
-    fn connect(_url: &str) -> Result<Self, DbError> where Self: Sized {
-        unimplemented!("Use SurrealDatabase::new(&args) instead");
-    }
-
+  
     fn store_vector(
         &self,
         table: &str,

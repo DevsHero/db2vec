@@ -32,17 +32,7 @@ impl QdrantDatabase {
 }
 
 impl Database for QdrantDatabase {
-    fn connect(url: &str) -> Result<Self, DbError> where Self: Sized {
-        let client = Client::new();
-        Ok(QdrantDatabase {
-            client,
-            url: url.to_string(),
-            api_key: None,
-            dimension: 768,
-            metric: "cosine".to_string(),
-        })
-    }
-
+ 
     fn store_vector(
         &self,
         table: &str,

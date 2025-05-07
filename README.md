@@ -150,7 +150,7 @@ This zero-config schema creation means you don't need to manually set up your ve
     ```bash
     # MySQL → Milvus (using Ollama)
     ./target/release/db2vec \
-      -f mysql_sample.sql \
+      -f samples/mysql_sample.sql \
       -t milvus \
       --host http://127.0.0.1:19530 \
       --database mydb \
@@ -162,7 +162,7 @@ This zero-config schema creation means you don't need to manually set up your ve
 
     # SurrealDB → Pinecone (using TEI)
     ./target/release/db2vec \
-      -f surreal_sample.surql \
+      -f samples/surreal_sample.surql \
       -t pinecone \
       --host https://index-123.svc.us-east-1.pinecone.io \
       --namespace myns \
@@ -173,7 +173,7 @@ This zero-config schema creation means you don't need to manually set up your ve
 
     # SQLite → Qdrant (using Google Gemini)
     ./target/release/db2vec \
-      -f sqlite_dump.sql \
+      -f samples/oracle_sample.sql \
       -t qdrant \
       --host http://localhost:6333 \
       --embedding-provider google \

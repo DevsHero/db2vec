@@ -220,10 +220,7 @@ impl RedisDatabase {
 }
 
 impl Database for RedisDatabase {
-    fn connect(_url: &str) -> Result<Self, DbError> where Self: Sized {
-        unimplemented!("Use RedisDatabase::new(&args) instead");
-    }
-
+ 
     fn store_vector(
         &self,
         table: &str,

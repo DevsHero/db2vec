@@ -151,10 +151,7 @@ impl PineconeDatabase {
     }
 }
 impl Database for PineconeDatabase {
-    fn connect(_url: &str) -> Result<Self, DbError> where Self: Sized {
-        unimplemented!("Use PineconeDatabase::new(&args) instead");
-    }
-
+ 
     fn store_vector(
         &self,
         table: &str,

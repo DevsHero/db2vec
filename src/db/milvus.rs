@@ -113,10 +113,7 @@ impl MilvusDatabase {
 }
 
 impl Database for MilvusDatabase {
-    fn connect(_url: &str) -> Result<Self, DbError> where Self: Sized {
-        unimplemented!("Use MilvusDatabase::new(&args) instead");
-    }
-
+ 
     fn store_vector(
         &self,
         table: &str,

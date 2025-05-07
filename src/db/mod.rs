@@ -17,8 +17,7 @@ use crate::cli::Args;
 pub type DbError = Box<dyn Error + Send + Sync>;
 
 pub trait Database: Send + Sync {
-    fn connect(_url: &str) -> Result<Self, DbError> where Self: Sized;
-
+    
     fn store_vector(&self, table: &str, items: &[(String, Vec<f32>, Value)]) -> Result<(), DbError>;
 }
 
