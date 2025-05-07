@@ -1,6 +1,6 @@
 [package]
 name = "db2vec"
-version = "0.5.5"
+version = "0.5.7"
 edition = "2024"
 authors = ["Thanon Aphithanawat"]
 description = "High-performance tool to parse database dumps, generate vector embeddings, and load them into vector databases"
